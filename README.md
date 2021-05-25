@@ -1,15 +1,15 @@
-## Executable scripts
-pnr_generate.py 		generate data
-pnr_properties.ipynb 	plot statistics of synthetic data
-pnr_vae.ipynb 			execute model training and analysis
+Repository for machine learning-assisted analysis of Polarized Neutron Reflectometry (PNR) data.
 
-## Helper scripts
-pnr_models.py 		all network components and architectures are stored here
-pnr_utils.py 		various utilities to assist with data import, processing, and plotting
-plot_imports.py 	some typical imports for plotting
+### Setup
+- Clone the repository with `git clone https://github.com/ninarina12/ML_PNR.git`.
+- Create a conda environment with necessary dependencies using `conda create --name myenv --file env_file.txt`.
 
-####################################################################################################
-## Examples
+### Workflow
+- Generate synthetic data by updating `pnr_generate.py` with the appropriate sample parameters and executing `mpiexec -n 25 python pnr_generate.py`. Example parameters are based on nominal values of measurements in the `experiments` directory.
+- Visualize properties of the synthetic data directly within the `pnr_properties.ipynb` notebook.
+- Train and evaluate a machine learning model within the `pnr_vae.ipynb` notebook.
 
-### Generating data using MPI:
-mpiexec -n 25 python pnr_generate.py
+#### Helper scripts
+- `pnr_models.py` contains all network components and architectures
+- `pnr_utils.py` contains various utilities to assist with data import, processing, and plotting
+- `plot_imports.py` contains some typical imports for plotting
