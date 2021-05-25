@@ -1,5 +1,3 @@
-# nice -n 19 mpiexec -n 25 python pnr_generate.py
-
 import numpy as np
 import pandas as pd
 import time
