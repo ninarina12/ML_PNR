@@ -359,8 +359,9 @@ def plot_history(image_dir, dynamics, logscale=False):
         if logscale:
             ax.set_yscale('log')
         else:
-            ax.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
-            ax.yaxis.offsetText.set_fontproperties(prop)
+            if (d['train'][metric].min() < 1e-1) or (d['train'][metric].max() >= 1e2):
+                ax.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+                ax.yaxis.offsetText.set_fontproperties(prop)
 
         format_axis(ax, 'epoch', format_metric_name(metric), prop)
         fig.tight_layout()
