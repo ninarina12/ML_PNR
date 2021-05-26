@@ -181,7 +181,8 @@ class CVAE(VAE):
         except: label_loss = 0
         else: label_loss = self.label_loss(z_mean, z_true)
         class_loss = self.class_loss(d_pred[1], d_true[1])
-        return torch.mean(recon_loss + self.b1*kld_loss) + self.b2*(label_loss + class_loss)
+        #return torch.mean(recon_loss + self.b1*kld_loss) + self.b2*(label_loss + class_loss)
+        return torch.mean(recon_loss + self.b1*kld_loss) + self.b2*(class_loss)
     
     def metrics(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         total_loss = self.loss_function(d_pred[0], d_true[0], z_mean, z_log_var, z_true)

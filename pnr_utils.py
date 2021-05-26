@@ -359,7 +359,9 @@ def plot_history(image_dir, dynamics, logscale=False):
         if logscale:
             ax.set_yscale('log')
         else:
-            if (d['train'][metric].min() < 1e-1) or (d['train'][metric].max() >= 1e2):
+            d_min = min([d['train'][metric] for d in dynamics])
+            d_max = max([d['train'][metric] for d in dynamics])
+            if (d_min < 1e-1) or (d_max >= 1e2):
                 ax.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
                 ax.yaxis.offsetText.set_fontproperties(prop)
 
@@ -703,7 +705,7 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
             for i in range(n_exp):
                 ax.scatter(z_proj[[i],0], z_proj[[i],1], color=cmap_temp(norm(temps[i])), ec='black', s=28)
                 
-        ax.text(0.95, 0.9, y_labels[k], ha='right', va='center', transform=ax.transAxes, fontproperties=prop)
+        ax.text(0.075, 0.9, y_labels[k], ha='left', va='center', transform=ax.transAxes, fontproperties=prop)
 
         format_axis(ax, '', '', prop)
         ax.locator_params(tight=True, nbins=4)
@@ -728,7 +730,7 @@ def plot_class_exp_statistics(df_exp):
     df_exp['major_class'] = (df_exp['major_class'] > 0.5).astype(int)
     df_exp['palette'] = df_exp['major_class'].map(lambda x: cmap_disc_light(x))
 
-    fig, ax = plt.subplots(figsize=(8,3.5))
+    fig, ax = plt.subplots(figsize=(7.8,3.2))
     prop.set_size(14)
 
     sns.violinplot(ax=ax, x='temperature', y='class_dist', width=0.6, scale='count', data=df_exp,
