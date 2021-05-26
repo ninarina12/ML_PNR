@@ -139,7 +139,7 @@ class VAE(nn.Module):
         return torch.mean(recon_loss + self.b1*kld_loss)
 
     def metrics(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
-        total_loss = self.loss_function(d_pred[0], d_true[0], z_mean, z_log_var, z_true)
+        total_loss = self.loss_function(d_pred, d_true, z_mean, z_log_var, z_true)
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = torch.mean(self.kld_loss(z_mean, z_log_var, z_true))
         recon_mse = F.mse_loss(d_pred[0], d_true[0])
@@ -178,7 +178,7 @@ class CVAE(VAE):
         return torch.mean(recon_loss + self.b1*kld_loss + self.b2*class_loss)
     
     def metrics(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
-        total_loss = self.loss_function(d_pred[0], d_true[0], z_mean, z_log_var, z_true)
+        total_loss = self.loss_function(d_pred, d_true, z_mean, z_log_var, z_true)
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = torch.mean(self.kld_loss(z_mean, z_log_var, z_true))
         class_loss = torch.mean(self.class_loss(d_pred[1], d_true[1]))
@@ -222,7 +222,7 @@ class RVAE(CVAE):
         return torch.mean(recon_loss + self.b1*kld_loss + self.b2*(class_loss + label_loss))
     
     def metrics(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
-        total_loss = self.loss_function(d_pred[0], d_true[0], z_mean, z_log_var, z_true)
+        total_loss = self.loss_function(d_pred, d_true, z_mean, z_log_var, z_true)
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = torch.mean(self.kld_loss(z_mean, z_log_var, z_true))
         label_loss = torch.mean(self.label_loss(d_pred[1][:,:-1], d_true[1][:,:-1]))
