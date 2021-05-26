@@ -169,7 +169,7 @@ class CVAE(VAE):
                             nn.Sigmoid())   
     
     def class_loss(self, y_pred, y_true):
-        return F.binary_cross_entropy(y_pred, y_true, reduction='none').squeeze()
+        return torch.sum(F.binary_cross_entropy(y_pred, y_true, reduction='none'), dim=-1)
     
     def loss_function(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
