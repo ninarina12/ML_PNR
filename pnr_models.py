@@ -257,7 +257,7 @@ def init_model(model_name, height, width, num_features, kwargs, device):
         metric_keys = ['total_loss', 'recon_loss', 'kld_loss', 'class_loss', 'recon_mse', 'class_accuracy']
         
     else:
-        kwargs.pop('beta_2')
+        if 'beta_2' in list(kwargs.keys()): kwargs.pop('beta_2')
         model = VAE(height, width, **kwargs).to(device)
         metric_keys = ['total_loss', 'recon_loss', 'kld_loss', 'recon_mse']
     

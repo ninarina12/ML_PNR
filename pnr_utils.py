@@ -323,7 +323,7 @@ def get_predictions_exp(model, x_exp, exp_names, device, height, width, num_feat
 
     else:
         y_exp_pred = None
-        predict_exp(model, x_exp, device, x_exp_pred, x_mse, z_exp)
+        predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_mse)
 
         if not z_std_norm:
             z_exp = scaler.inverse_transform(z_exp)
