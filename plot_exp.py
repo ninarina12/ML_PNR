@@ -179,9 +179,6 @@ layer_bounds = 0.1*np.array(layer_bounds)
 
 # plot reflectivity and fit
 fig, (ax1, ax2) = plt.subplots(1,2, figsize=(10,4.5))
-#canvas = FigureCanvas(fig)
-#ax1 = fig.add_subplot(121)
-#ax2 = fig.add_subplot(122)
 prop.set_size(18)
 lprop = prop.copy()
 lprop.set_size(14)
