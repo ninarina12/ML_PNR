@@ -166,10 +166,7 @@ class CVAE(VAE):
         # build classifier
         self.classifier = nn.Sequential(
                             nn.Linear(in_features=latent_dim, out_features=1, bias=False),
-                            nn.Sigmoid())
-    
-    def label_loss(self, y_pred, y_true):
-        return F.mse_loss(y_pred, y_true)    
+                            nn.Sigmoid())   
     
     def class_loss(self, y_pred, y_true):
         return F.binary_cross_entropy(y_pred, y_true)
@@ -177,27 +174,18 @@ class CVAE(VAE):
     def loss_function(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = self.kld_loss(z_mean, z_log_var, z_true)
-        try: len(z_true)
-        except: label_loss = 0
-        else: label_loss = self.label_loss(z_mean, z_true)
         class_loss = self.class_loss(d_pred[1], d_true[1])
-        #return torch.mean(recon_loss + self.b1*kld_loss) + self.b2*(label_loss + class_loss)
         return torch.mean(recon_loss + self.b1*kld_loss) + self.b2*(class_loss)
     
     def metrics(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         total_loss = self.loss_function(d_pred[0], d_true[0], z_mean, z_log_var, z_true)
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = torch.mean(self.kld_loss(z_mean, z_log_var, z_true))
-        try: len(z_true)
-        except: label_loss = 0
-        else: label_loss = self.label_loss(z_mean, z_true)
         class_loss = self.class_loss(d_pred[1], d_true[1])
         recon_mse = F.mse_loss(d_pred[0], d_true[0])
-        label_mse = F.mse_loss(z_mean, z_true)
         class_accuracy = ((d_pred[1] > 0.5).float() == d_true[1]).float().mean()
-        return {'total_loss': total_loss, 'recon_loss': recon_loss, 'kld_loss': kld_loss, 'label_loss': label_loss,
-                'class_loss': class_loss, 'recon_mse': recon_mse, 'label_mse': label_mse,
-                'class_accuracy': class_accuracy}
+        return {'total_loss': total_loss, 'recon_loss': recon_loss, 'kld_loss': kld_loss, 'class_loss': class_loss,
+                'recon_mse': recon_mse, 'class_accuracy': class_accuracy}
     
     def forward(self, x):
         z_mean, z_log_var = self.encode(x)
@@ -223,6 +211,9 @@ class RVAE(CVAE):
             p = nn.Linear(in_features=latent_dim, out_features=1, bias=False)
             setattr(self, "reg_%d"%i, p)
     
+    def label_loss(self, y_pred, y_true):
+        return F.mse_loss(y_pred, y_true) 
+
     def loss_function(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = self.kld_loss(z_mean, z_log_var, z_true)
@@ -263,8 +254,7 @@ def init_model(model_name, height, width, num_features, kwargs, device):
     
     elif model_name == 'cvae':
         model = CVAE(height, width, **kwargs).to(device)
-        metric_keys = ['total_loss', 'recon_loss', 'kld_loss', 'label_loss', 'class_loss', 'recon_mse', 'label_mse',
-                       'class_accuracy']
+        metric_keys = ['total_loss', 'recon_loss', 'kld_loss', 'class_loss', 'recon_mse', 'class_accuracy']
         
     else:
         kwargs.pop('beta_2')

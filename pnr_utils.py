@@ -488,30 +488,40 @@ def plot_decoded_exp(image_dir, x_pred, exp_names, q, x_moms):
 
 #################################################################################################################
 
-def plot_predicted(image_dir, y_pred, y_true, y_ids, y_labels, y_units):
+def plot_predicted(image_dir, y_pred, y_true, y_mse, y_ids, y_labels, y_units):
     prop.set_size(14)
     w = int((len(y_ids) + (len(y_ids)%3 > 0)*(3 - len(y_ids)%3))/3)
-    fig = plt.figure(figsize=(2.9*w, 8))
-
+    fig = plt.figure(figsize=(3.2*w, 8))
+    cmap_mse = truncate_colormap(mpl.cm.get_cmap('bone_r'), minval=0.2, maxval=0.8)
+    
     for k in range(len(y_ids)-1):
         ax = fig.add_subplot(3, w, k+1)
+        norm = mpl.colors.Normalize(vmin=np.sqrt(y_mse[:,k]).min(), vmax=np.sqrt(y_mse[:,k]).max())
+
+        g = ax.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=np.sqrt(y_mse[:,k]), s=10, cmap=cmap_mse, norm=norm)
+        cbar = fig.colorbar(g, ax=ax, aspect=12)
+        cbar.ax.set_title('RMSE ' + y_units[k], fontproperties=prop)
+        cbar.ax.tick_params(direction='in', length=6, width=1)
+        for lab in cbar.ax.get_yticklabels():
+            lab.set_fontproperties(prop)
+        cbar.outline.set_visible(False)
+        ax.clear()
+        ax.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=np.sqrt(y_mse[:,k]), s=10, alpha=0.1, cmap=cmap_mse, norm=norm)
         
-        for key, color in set_colors.items():
-            ax.scatter(y_true[key][:,y_ids[k]], y_pred[key][:,k], c=color, s=10, alpha=0.1, cmap=cmap)
+        ax.text(0.075, 0.9, y_labels[k], ha='left', va='center', transform=ax.transAxes, fontproperties=prop)
         
-        format_axis(ax, 'true ' + y_labels[k] + ' ' + y_units[k], 'pred. ' + y_labels[k] + ' ' + y_units[k], prop)
+        format_axis(ax, '', '', prop)
         ax.locator_params(tight=True, nbins=4)
         ax.set_aspect('equal')
         
-        x_min = np.min([min(y_true[key][:,y_ids[k]].min(),
-                            y_pred[key][:,k].min()) for key in list(set_colors.keys())])
-        x_max = np.max([max(y_true[key][:,y_ids[k]].max(),
-                            y_pred[key][:,k].max()) for key in list(set_colors.keys())])
+        x_min = min(y_true[:,y_ids[k]].min(), y_pred[:,k].min())
+        x_max = max(y_true[:,y_ids[k]].max(), y_pred[:,k].max())
         ax.set_xlim([x_min, x_max])
         ax.set_ylim([x_min, x_max])
+        ax.plot([x_min, x_max], [x_min, x_max], color='black', linestyle='--')
             
     fig.tight_layout()
-    fig.subplots_adjust(wspace=0.15, hspace=0.4)
+    fig.subplots_adjust(wspace=0.15, hspace=0.3)
     fig.savefig(image_dir + '/predicted.png', dpi=400)
 
 
