@@ -169,19 +169,19 @@ class CVAE(VAE):
                             nn.Sigmoid())   
     
     def class_loss(self, y_pred, y_true):
-        return F.binary_cross_entropy(y_pred, y_true)
+        return F.binary_cross_entropy(y_pred, y_true, reduction='none').squeeze()
     
     def loss_function(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = self.kld_loss(z_mean, z_log_var, z_true)
         class_loss = self.class_loss(d_pred[1], d_true[1])
-        return torch.mean(recon_loss + self.b1*kld_loss) + self.b2*(class_loss)
+        return torch.mean(recon_loss + self.b1*kld_loss + self.b2*class_loss)
     
     def metrics(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         total_loss = self.loss_function(d_pred[0], d_true[0], z_mean, z_log_var, z_true)
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = torch.mean(self.kld_loss(z_mean, z_log_var, z_true))
-        class_loss = self.class_loss(d_pred[1], d_true[1])
+        class_loss = torch.mean(self.class_loss(d_pred[1], d_true[1]))
         recon_mse = F.mse_loss(d_pred[0], d_true[0])
         class_accuracy = ((d_pred[1] > 0.5).float() == d_true[1]).float().mean()
         return {'total_loss': total_loss, 'recon_loss': recon_loss, 'kld_loss': kld_loss, 'class_loss': class_loss,
@@ -212,21 +212,21 @@ class RVAE(CVAE):
             setattr(self, "reg_%d"%i, p)
     
     def label_loss(self, y_pred, y_true):
-        return F.mse_loss(y_pred, y_true) 
+        return torch.sum(F.mse_loss(y_pred, y_true, reduction='none'), dim=-1)
 
     def loss_function(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = self.kld_loss(z_mean, z_log_var, z_true)
         label_loss = self.label_loss(d_pred[1][:,:-1], d_true[1][:,:-1])
         class_loss = self.class_loss(d_pred[1][:,[-1]], d_true[1][:,[-1]])
-        return torch.mean(recon_loss + self.b1*kld_loss) + self.b2*(label_loss + class_loss)
+        return torch.mean(recon_loss + self.b1*kld_loss + self.b2*(class_loss + label_loss))
     
     def metrics(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         total_loss = self.loss_function(d_pred[0], d_true[0], z_mean, z_log_var, z_true)
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = torch.mean(self.kld_loss(z_mean, z_log_var, z_true))
-        label_loss = self.label_loss(d_pred[1][:,:-1], d_true[1][:,:-1])
-        class_loss = self.class_loss(d_pred[1][:,[-1]], d_true[1][:,[-1]])
+        label_loss = torch.mean(self.label_loss(d_pred[1][:,:-1], d_true[1][:,:-1]))
+        class_loss = torch.mean(self.class_loss(d_pred[1][:,[-1]], d_true[1][:,[-1]]))
         recon_mse = F.mse_loss(d_pred[0], d_true[0])
         label_mse = F.mse_loss(d_pred[1], d_true[1])
         class_accuracy = ((d_pred[1][:,[-1]] > 0.5).float() == d_true[1][:,[-1]]).float().mean()
