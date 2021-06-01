@@ -117,8 +117,8 @@ def read_exp(file_name):
 ################################################### constants ###################################################
 
 # name of experiment sample, name of function to build sample stack, maximum q (A^-1), neutron wavelength (A)
-sample_name, structure, q_max, wavelen = 'BiSe10_EuS5', 'Al2O3_Bi2Se3_EuS_aAl2O3', 0.13, 4.75
-#sample_name, structure, q_max, wavelen = 'CrO20_BiSbTe20', 'Al2O3_Cr2O3_BiSb2Te3_Te_TeO2', 0.18, 5.35
+#sample_name, structure, q_max, wavelen = 'BiSe10_EuS5', 'Al2O3_Bi2Se3_EuS_aAl2O3', 0.13, 4.75
+sample_name, structure, q_max, wavelen = 'CrO20_BiSbTe20', 'Al2O3_Cr2O3_BiSb2Te3_Te_TeO2', 0.17, 5.35
 
 N = 256                                                 # number of q points for reflectivity plot
 q_min = 0.01

@@ -27,7 +27,7 @@ def parse_metadata(dir_name):
     return layers, N, q_min, q_max
 
 
-def parse_labels(df):
+def parse_labels(df, include_roughness=False):
     # parse and format labels for plotting selected parameters
     
     # drop columns with duplicate values (e.g. dens columns if multiple sublayers)
@@ -41,17 +41,25 @@ def parse_labels(df):
     # exclude columns whose values are always 0
     y_header = list(df.columns[~(df == 0).all()])
     
-    # exclude roughness
-    y_header = [l for l in y_header if not l.startswith('s_')]
+    if not include_roughness:
+        # exclude roughness
+        y_header = [l for l in y_header if not l.startswith('s_')]
+        sym_old = ['dens_', 'd_', 'magn_']
+        sym_new = [r'\rho_', 't_', 'm_']
+    else:
+        sym_old = ['dens_', 'd_', 's_', 'magn_']
+        sym_new = [r'\rho_', 't_', r'\sigma_', 'm_']
+    
     y_ids = np.array([list(df.columns).index(l) for l in y_header])
-    y_labels = [r'$' + l.split('_')[0] + '_{' + l.split('_')[1] + '}$' for l in y_header]
 
     # translate to symbols
-    for old, new in zip(['dens_', 'd_', 'magn_'], [r'\rho_', 't_', 'm_']):
-        y_labels = [l.replace(old, new) for l in y_labels]
+    y_labels = [r'$' + l.split('_')[0] + '_{' + l.split('_')[1] + '}$' for l in y_header]
+    for old, new in zip(sym_old, sym_new):
+        y_labels[:-1] = [l.replace(old, new) for l in y_labels[:-1]]
 
     y_units = ['(f.u./'+r'$nm^3$)']*len([l for l in y_header if l.startswith('dens_')]) + \
               ['(nm)']*len([l for l in y_header if l.startswith('d_')]) + \
+              ['(nm)']*len([l for l in y_header if l.startswith('s_')]) + \
               [r'($\mu_B$)']*len([l for l in y_header if l.startswith('magn_')]) + ['']
 
     return y_data, y_columns, y_header, y_ids, y_labels, y_units
@@ -64,7 +72,7 @@ def read_exp(file_name):
 
 #################################################################################################################
 
-def process_data(data_dir, sample_name, exp_name, q, seed):
+def process_data(data_dir, sample_name, exp_name, q, seed, include_roughness=False):
     # read and process simulation data
     xdata_uu =  data_dir + '/xdata_uu.txt'
     xdata_dd =  data_dir + '/xdata_dd.txt'
@@ -88,7 +96,7 @@ def process_data(data_dir, sample_name, exp_name, q, seed):
     
     # read labels
     y_df = pd.read_csv(ydata, dtype=float)
-    y_data, y_columns, y_header, y_ids, y_labels, y_units = parse_labels(y_df)
+    y_data, y_columns, y_header, y_ids, y_labels, y_units = parse_labels(y_df, include_roughness=include_roughness)
 
     return x_data, x_orig, x_moms, y_data, y_columns, y_header, y_ids, y_labels, y_units
 
@@ -118,9 +126,6 @@ def process_exp(exp_names, q, x_moms=(0,1)):
 
         # normalize
         x_exp, _ = normalize_log(x_exp, x_moms)
-        
-        # remove nans
-        x_exp[np.isnan(x_exp)] = 0.
         
         x_exp_list += [x_exp]
 
@@ -257,8 +262,8 @@ def get_predictions(model, data_loaders, d_sets, device, height, width, num_feat
 
         # invert standardization
         if not z_std_norm:
-            z = scaler.inverse_transform(z)
-            z_mse = scaler.inverse_transform(z_mse) - scaler.mean_
+            z[:,:len(y_ids)-1] = scaler.inverse_transform(z[:,:len(y_ids)-1])
+            z_mse[:,:len(y_ids)-1] = scaler.inverse_transform(z_mse[:,:len(y_ids)-1]) - scaler.mean_
         
         x = np.copy(data_loaders[d_set].dataset[:][0].numpy())
         y = np.copy(data_loaders[d_set].dataset[:][1].numpy())
@@ -296,7 +301,7 @@ def get_predictions(model, data_loaders, d_sets, device, height, width, num_feat
 
 
 def get_predictions_exp(model, x_exp, exp_names, device, height, width, num_features, kwargs, model_name, z_std_norm,
-                        scaler):
+                        y_ids, scaler):
     
     temps = [i[i.index('/')+1:] for i in exp_names]
     df = pd.DataFrame({'set': temps,
@@ -311,22 +316,16 @@ def get_predictions_exp(model, x_exp, exp_names, device, height, width, num_feat
         predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_mse, y_exp_pred)
         y_exp_pred[:,:-1] = scaler.inverse_transform(y_exp_pred[:,:-1])
 
-        if not z_std_norm:
-            z_exp = scaler.inverse_transform(z_exp)
-
     elif model_name == 'cvae':
         y_exp_pred = np.zeros((x_exp.shape[0], 1))
         predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_mse, y_exp_pred)
-
-        if not z_std_norm:
-            z_exp = scaler.inverse_transform(z_exp)
 
     else:
         y_exp_pred = None
         predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_mse)
 
-        if not z_std_norm:
-            z_exp = scaler.inverse_transform(z_exp)
+    if not z_std_norm:
+        z_exp[:,:len(y_ids)-1] = scaler.inverse_transform(z_exp[:,:len(y_ids)-1])
     
     df['x_pred'] = [k for k in x_exp_pred.squeeze()]
     df['x_mse'] = [k for k in x_exp_pred]
@@ -423,7 +422,10 @@ def plot_decoded(image_dir, x_pred, x_true, x_mse, d_set):
     tprop.set_size(12)
     
     # identify quartiles by MSE
-    x_mse = np.sort(x_mse)
+    i_mse = np.argsort(x_mse)
+    x_mse = x_mse[i_mse]
+    x_pred = x_pred[i_mse]
+    x_true = x_true[i_mse]
     quartiles = np.quantile(x_mse, (0.25, 0.5, 0.75, 1.))
     i_quart = [0] + [np.argmin(np.abs(x_mse - k)) for k in quartiles]
     idx = np.concatenate([np.sort(np.random.randint(i_quart[k-1], i_quart[k], size=n)) for k in range(1,5)])
@@ -490,12 +492,14 @@ def plot_decoded_exp(image_dir, x_pred, exp_names, q, x_moms):
 
 def plot_predicted(image_dir, y_pred, y_true, y_mse, y_ids, y_labels, y_units):
     prop.set_size(14)
-    w = int((len(y_ids) + (len(y_ids)%3 > 0)*(3 - len(y_ids)%3))/3)
-    fig = plt.figure(figsize=(3.2*w, 8))
+    if len(y_ids) > 15: n = 5
+    else: n = 3
+    w = int((len(y_ids) + (len(y_ids)%n > 0)*(n - len(y_ids)%n))/n)
+    fig = plt.figure(figsize=(3.2*w, n*2.67))
     cmap_mse = truncate_colormap(mpl.cm.get_cmap('bone_r'), minval=0.2, maxval=0.8)
     
     for k in range(len(y_ids)-1):
-        ax = fig.add_subplot(3, w, k+1)
+        ax = fig.add_subplot(n, w, k+1)
         norm = mpl.colors.Normalize(vmin=np.sqrt(y_mse[:,k]).min(), vmax=np.sqrt(y_mse[:,k]).max())
 
         g = ax.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=np.sqrt(y_mse[:,k]), s=10, cmap=cmap_mse, norm=norm)
@@ -645,8 +649,10 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
     mode_dict = {0: 'x-pca', 1: 'y-pca', 2: 'y-grad', 3: 'x-mds'}
 
     prop.set_size(14)
-    w = int((len(y_ids) + (len(y_ids)%3 > 0)*(3 - len(y_ids)%3))/3)
-    fig = plt.figure(figsize=(3*w, 7.5))
+    if len(y_ids) > 15: n = 5
+    else: n = 3
+    w = int((len(y_ids) + (len(y_ids)%n > 0)*(n - len(y_ids)%n))/n)
+    fig = plt.figure(figsize=(3*w, n*2.5))
 
     # downsampling
     if mode < 3:
@@ -666,7 +672,7 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
     
     xd = x_data[::d,:]
     for k in range(len(y_ids)):
-        ax = fig.add_subplot(3, w, k+1)
+        ax = fig.add_subplot(n, w, k+1)
         yd = y_data[::d,y_ids[k]]
         
         if mode == 0:
@@ -727,7 +733,8 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
 
 #################################################################################################################  
 
-def plot_class_exp_statistics(df_exp):
+def plot_class_exp_statistics(image_dir, df_exp, reps):
+    # plot statistics of proximity class
     df_exp['temperature'] = df_exp['set'].map(lambda x: int(x[:-1]))
     df_exp['class_pred'] = df_exp['y_pred'].map(lambda x: x[-1])
     df_exp['class_dist'] = df_exp['class_pred'] - df_exp['th']
@@ -751,4 +758,42 @@ def plot_class_exp_statistics(df_exp):
     ax.axhline(0, linestyle='--', color='#ADABA4')
     format_axis(ax, 'Temperature (K)', r'$class_{pred} - t_{cutoff}$', prop)
     fig.tight_layout()
-    fig.savefig(model_dir + '/class_distribution_exp.pdf')
+    fig.savefig(image_dir + '/class_distribution_exp.pdf')
+
+def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_units, y_th=None):
+    # plot statistics of parameter in given column of latent representation z
+    column = y_header.index(y_name)
+    df_exp['temperature'] = df_exp['set'].map(lambda x: int(x[:-1]))
+    df_exp['p'] = df_exp['z'].map(lambda x: x[column])
+    
+    if y_th != None:
+        df_exp['p_dist'] = df_exp['p'] - y_th
+        df_exp['p_class'] = (df_exp['p_dist'] > 0).astype(int)
+        df_exp['major_class'] = 0
+        for entry in df_exp.itertuples():
+            if entry.p_class > 0:
+                df_exp.loc[df_exp['set'] == entry.set, 'major_class'] += 1
+        df_exp['major_class'] = df_exp['major_class']/(reps + 1)
+        df_exp['major_class'] = (df_exp['major_class'] > 0.5).astype(int)
+        df_exp['palette'] = df_exp['major_class'].map(lambda x: cmap_disc_light(x))
+
+    else:
+        df_exp['palette'] = '#6A96A9'
+
+    fig, ax = plt.subplots(figsize=(7.8,3.2))
+    prop.set_size(14)
+
+    sns.violinplot(ax=ax, x='temperature', y='p', width=0.6, scale='count', data=df_exp,
+                   inner=None, saturation=0.9, palette=df_exp['palette'].tolist(), linewidth=0)
+
+    if y_th != None:
+        g = sns.swarmplot(ax=ax, x='temperature', y='p', hue='p_class', data=df_exp,
+                          palette={0: cmap_disc(0), 1: cmap_disc(1)}, edgecolor='black', linewidth=1)
+        g.legend_.remove()
+        ax.axhline(y_th, linestyle='--', color='#ADABA4')
+    else:
+        sns.swarmplot(ax=ax, x='temperature', y='p', data=df_exp, color='#316986', edgecolor='black', linewidth=1)
+
+    format_axis(ax, 'Temperature (K)', y_labels[column] + ' ' + y_units[column], prop)
+    fig.tight_layout()
+    fig.savefig(image_dir + '/' + y_header[column] + '_distribution_exp.pdf')

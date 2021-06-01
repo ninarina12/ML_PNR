@@ -12,6 +12,7 @@ class VAE(nn.Module):
         # definitions
         self.height = height
         self.width = width
+        self.latent_dim = latent_dim
         self.b1 = beta_1
         
         # round up kernel size to nearest odd integer
@@ -275,7 +276,9 @@ def train(epoch, model, opt, metric_keys, train_loader, device, model_name, z_st
         d_pred, z_mean, z_log_var = model(x_true)
         
         if z_std_norm: z_true = 0
-        else: z_true = y_true[:,:-1]
+        else:
+            z_true = torch.zeros((len(x_true), model.latent_dim)).to(device)
+            z_true[:,:y_true.size()[1]-1] = y_true[:,:-1]
             
         if model_name == 'cvae':
             loss = model.loss_function(d_pred, [x_true, y_true[:,[-1]]], z_mean, z_log_var, z_true)
@@ -316,7 +319,9 @@ def evaluate(epoch, model, metric_keys, valid_loader, device, model_name, z_std_
             d_pred, z_mean, z_log_var = model(x_true)
             
             if z_std_norm: z_true = 0
-            else: z_true = y_true[:,:-1]
+            else:
+                z_true = torch.zeros((len(x_true), model.latent_dim)).to(device)
+                z_true[:,:y_true.size()[1]-1] = y_true[:,:-1]
             
             if model_name == 'cvae':
                 metrics_batch = model.metrics(d_pred, [x_true, y_true[:,[-1]]], z_mean, z_log_var, z_true)
@@ -371,7 +376,7 @@ def predict(model, data_loader, device, y_ids, x_set, z_set, x_mse, y_set=None, 
             try: len(z_mse)
             except: pass
             else:
-                metric = F.mse_loss(z_mean, y_true[:,:-1], reduction='none')
+                metric = F.mse_loss(z_mean[:,:y_true.size()[1]-1], y_true[:,:-1], reduction='none')
                 z_mse[i_start:i_start + len(x_true),:] = metric.cpu().numpy()
                 
             i_start += len(x_true)
