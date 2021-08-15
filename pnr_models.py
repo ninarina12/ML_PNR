@@ -4,6 +4,21 @@ from torch import nn
 from torch.nn import functional as F
 from torch import optim
 
+class TorchStandardScaler:
+    def fit(self, x):
+        self.mean = x.mean(0, keepdim=True)
+        self.std = x.std(0, unbiased=False, keepdim=True)
+
+    def transform(self, x):
+        x -= self.mean
+        x /= self.std
+        return x
+
+    def inverse_transform(self, x):
+        x *= self.std
+        x += self.mean
+        return x
+
 class VAE(nn.Module):
     def __init__(self, height, width, hidden_dim, latent_dim, start_filters, kernel_size, pool_size, num_conv,
                  num_dense, slope, drop, beta_1):
@@ -167,8 +182,9 @@ class CVAE(VAE):
         # build classifier
         self.classifier = nn.Sequential(
                             nn.Linear(in_features=latent_dim, out_features=1, bias=False),
-                            nn.Sigmoid())   
-    
+                            nn.Sigmoid()
+                        )   
+
     def class_loss(self, y_pred, y_true):
         return torch.sum(F.binary_cross_entropy(y_pred, y_true, reduction='none'), dim=-1)
     
@@ -198,47 +214,50 @@ class CVAE(VAE):
             return [self.decode(z_mean), y], z_mean, z_log_var
         
 
-class RVAE(CVAE):
-    def __init__(self, height, width, num_features, hidden_dim, latent_dim, start_filters, kernel_size, pool_size, 
+class RVAE(VAE):
+    def __init__(self, height, width, num_features, scaler, hidden_dim, latent_dim, start_filters, kernel_size, pool_size, 
                  num_conv, num_dense, slope, drop, beta_1, beta_2):
         super(RVAE, self).__init__(height, width, hidden_dim, latent_dim, start_filters, kernel_size, pool_size,
-                                   num_conv, num_dense, slope, drop, beta_1, beta_2)
+                                   num_conv, num_dense, slope, drop, beta_1)
         
         # definitions
         self.num_features = num_features
-        
+        self.scaler = scaler
+        self.b2 = beta_2
+
         # build regressors
         for i in range(num_features):
             p = nn.Linear(in_features=latent_dim, out_features=1, bias=False)
             setattr(self, "reg_%d"%i, p)
-    
+        
+        if self.scaler != None:
+            self.pos = nn.ReLU()
+
     def label_loss(self, y_pred, y_true):
         return torch.sum(F.mse_loss(y_pred, y_true, reduction='none'), dim=-1)
 
     def loss_function(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = self.kld_loss(z_mean, z_log_var, z_true)
-        label_loss = self.label_loss(d_pred[1][:,:-1], d_true[1][:,:-1])
-        class_loss = self.class_loss(d_pred[1][:,[-1]], d_true[1][:,[-1]])
-        return torch.mean(recon_loss + self.b1*kld_loss + self.b2*(class_loss + label_loss))
+        label_loss = self.label_loss(d_pred[1], d_true[1][:,:-1])
+        return torch.mean(recon_loss + self.b1*kld_loss + self.b2*label_loss)
     
     def metrics(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
         total_loss = self.loss_function(d_pred, d_true, z_mean, z_log_var, z_true)
         recon_loss = self.recon_loss(d_pred[0], d_true[0])
         kld_loss = torch.mean(self.kld_loss(z_mean, z_log_var, z_true))
-        label_loss = torch.mean(self.label_loss(d_pred[1][:,:-1], d_true[1][:,:-1]))
-        class_loss = torch.mean(self.class_loss(d_pred[1][:,[-1]], d_true[1][:,[-1]]))
+        label_loss = torch.mean(self.label_loss(d_pred[1], d_true[1][:,:-1]))
         recon_mse = F.mse_loss(d_pred[0], d_true[0])
-        label_mse = F.mse_loss(d_pred[1], d_true[1])
-        class_accuracy = ((d_pred[1][:,[-1]] > 0.5).float() == d_true[1][:,[-1]]).float().mean()
+        label_mse = F.mse_loss(d_pred[1], d_true[1][:,:-1])
         return {'total_loss': total_loss, 'recon_loss': recon_loss, 'kld_loss': kld_loss, 'label_loss': label_loss,
-                'class_loss': class_loss, 'recon_mse': recon_mse, 'label_mse': label_mse,
-                'class_accuracy': class_accuracy}
+                'recon_mse': recon_mse, 'label_mse': label_mse}
     
     def forward(self, x):
         z_mean, z_log_var = self.encode(x)
-        y = self.classifier(z_mean)
-        y = torch.cat([getattr(self, "reg_%d"%i)(z_mean) for i in range(self.num_features)] + [y], dim=1)
+        y = torch.cat([getattr(self, "reg_%d"%i)(z_mean) for i in range(self.num_features)], dim=1)
+        if self.scaler != None:
+            y = self.scaler.transform(self.pos(self.scaler.inverse_transform(y)))
+        
         if self.training:
             z = self.sampling(z_mean, z_log_var)
             return [self.decode(z), y], z_mean, z_log_var
@@ -247,11 +266,10 @@ class RVAE(CVAE):
 
 #################################################################################################################
 
-def init_model(model_name, height, width, num_features, kwargs, device):
+def init_model(model_name, height, width, num_features, kwargs, device, scaler=None):
     if model_name == 'rvae':
-        model = RVAE(height, width, num_features, **kwargs).to(device)
-        metric_keys = ['total_loss', 'recon_loss', 'kld_loss', 'label_loss', 'class_loss', 'recon_mse', 'label_mse',
-                       'class_accuracy']
+        model = RVAE(height, width, num_features, scaler, **kwargs).to(device)
+        metric_keys = ['total_loss', 'recon_loss', 'kld_loss', 'label_loss', 'recon_mse', 'label_mse']
     
     elif model_name == 'cvae':
         model = CVAE(height, width, **kwargs).to(device)
@@ -279,7 +297,7 @@ def train(epoch, model, opt, metric_keys, train_loader, device, model_name, z_st
         else:
             z_true = torch.zeros((len(x_true), model.latent_dim)).to(device)
             z_true[:,:y_true.size()[1]-1] = y_true[:,:-1]
-            
+
         if model_name == 'cvae':
             loss = model.loss_function(d_pred, [x_true, y_true[:,[-1]]], z_mean, z_log_var, z_true)
             metrics_batch = model.metrics(d_pred, [x_true, y_true[:,[-1]]], z_mean, z_log_var, z_true)
@@ -322,7 +340,7 @@ def evaluate(epoch, model, metric_keys, valid_loader, device, model_name, z_std_
             else:
                 z_true = torch.zeros((len(x_true), model.latent_dim)).to(device)
                 z_true[:,:y_true.size()[1]-1] = y_true[:,:-1]
-            
+
             if model_name == 'cvae':
                 metrics_batch = model.metrics(d_pred, [x_true, y_true[:,[-1]]], z_mean, z_log_var, z_true)
             else:
@@ -344,7 +362,7 @@ def evaluate(epoch, model, metric_keys, valid_loader, device, model_name, z_std_
     return metrics
 
 
-def predict(model, data_loader, device, y_ids, x_set, z_set, x_mse, y_set=None, y_mse=None, z_mse=None):
+def predict(model, data_loader, device, y_ids, x_set, z_set, x_mse, y_set=None, y_err=None, z_mse=None):
     model.eval()
 
     with torch.no_grad():
@@ -365,12 +383,12 @@ def predict(model, data_loader, device, y_ids, x_set, z_set, x_mse, y_set=None, 
             except: pass
             else: y_set[i_start:i_start + len(x_true),:] = d_pred[1].cpu().numpy()
             
-            # save y_mse
-            try: len(y_mse)
+            # save y_err
+            try: len(y_err)
             except: pass
             else:
-                metric = F.mse_loss(d_pred[1][:,:-1], y_true[:,:-1], reduction='none')
-                y_mse[i_start:i_start + len(x_true),:] = metric.cpu().numpy()
+                metric = F.l1_loss(d_pred[1], y_true[:,:-1], reduction='none')
+                y_err[i_start:i_start + len(x_true),:] = metric.cpu().numpy()
 
             # save z_mse
             try: len(z_mse)
@@ -392,7 +410,7 @@ def predict_exp(model, x_true, device, x_set, z_set, x_mse, y_set=None):
         # save to array
         x_set[:,:] = d_pred[0].cpu().squeeze().numpy()
         z_set[:,:] = z_mean.cpu().numpy()
-        x_mse[:] = F.mse_loss(d_pred[0].squeeze(), x_true.squeeze(), reduction='none').mean(dim=(1,2)).cpu().numpy()
+        x_mse[:] = F.mse_loss(d_pred[0].squeeze(1), x_true.squeeze(1), reduction='none').mean(dim=(1,2)).cpu().numpy()
 
         # save y_pred
         try: len(y_set)

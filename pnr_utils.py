@@ -6,6 +6,7 @@ import seaborn as sns
 
 from scipy.spatial import KDTree
 from scipy.interpolate import interp1d
+from scipy.stats import gaussian_kde
 from sklearn.decomposition import PCA
 from sklearn.manifold import MDS
 from sklearn.model_selection import train_test_split
@@ -21,17 +22,20 @@ def parse_metadata(dir_name):
     with open(dir_name + '/metadata.txt') as f:
         meta = json.load(f)
         layers = meta['PARAMETERS']['layers']
+        rho = meta['PARAMETERS']['densities (g/cm^3)']
+        M = meta['PARAMETERS']['molar masses (g/mol)']
         N = meta['PARAMETERS']['number of q-points']
         q_min = meta['PARAMETERS']['q_min (A^-1)']
         q_max = meta['PARAMETERS']['q_max (A^-1)']
-    return layers, N, q_min, q_max
+    return layers, rho, M, N, q_min, q_max
 
 
 def parse_labels(df, include_roughness=False):
     # parse and format labels for plotting selected parameters
     
     # drop columns with duplicate values (e.g. dens columns if multiple sublayers)
-    df = df.T.drop_duplicates().T
+    cols = [k for k in df.columns if '.' in k]
+    df = df.drop(columns=cols)
 
     # parse y-values
     df['class_prox'] = (df['magn_prox'] > 0).astype(float)
@@ -60,7 +64,7 @@ def parse_labels(df, include_roughness=False):
     y_units = ['(f.u./'+r'$nm^3$)']*len([l for l in y_header if l.startswith('dens_')]) + \
               ['(nm)']*len([l for l in y_header if l.startswith('d_')]) + \
               ['(nm)']*len([l for l in y_header if l.startswith('s_')]) + \
-              [r'($\mu_B$)']*len([l for l in y_header if l.startswith('magn_')]) + ['']
+              [r'($\mu_B$'+'/f.u.)']*len([l for l in y_header if l.startswith('magn_')]) + ['']
 
     return y_data, y_columns, y_header, y_ids, y_labels, y_units
 
@@ -81,7 +85,7 @@ def process_data(data_dir, sample_name, exp_name, q, seed, include_roughness=Fal
     x_uu = pd.read_csv(xdata_uu, header=None, sep=' ', dtype=float).values
     x_dd = pd.read_csv(xdata_dd, header=None, sep=' ', dtype=float).values
     x_orig = np.stack([x_uu, x_dd], axis=2)
-        
+    
     # add noise based on experimental spectra
     xdata_uu =  data_dir + '/xdata_uu_exp.txt'
     xdata_dd =  data_dir + '/xdata_dd_exp.txt'
@@ -93,7 +97,7 @@ def process_data(data_dir, sample_name, exp_name, q, seed, include_roughness=Fal
     # normalize
     x_data, x_moms = normalize_log(x_data)
     x_orig, _ = normalize_log(x_orig, x_moms)
-    
+
     # read labels
     y_df = pd.read_csv(ydata, dtype=float)
     y_data, y_columns, y_header, y_ids, y_labels, y_units = parse_labels(y_df, include_roughness=include_roughness)
@@ -160,9 +164,8 @@ def add_noise(exp_name, q, x, x_orig, seed):
 
     # apply gentle smoothing
     window_radius = int(len(q)/32.)
-    for i in range(x.shape[0]):
-        x[i,:,0] = smooth_inverse(q, x[i,:,0], window_radius)
-        x[i,:,1] = smooth_inverse(q, x[i,:,1], window_radius)
+    x[:,:,0] = smooth_inverse(q, x[:,:,0], window_radius)
+    x[:,:,1] = smooth_inverse(q, x[:,:,1], window_radius)
     return x
 
 
@@ -211,12 +214,19 @@ def smooth_inverse(x, y, window_radius):
 
 def smooth_data(x, window_radius):
     window_len = 2*window_radius+1
-    if x.size < window_len:
-        raise(ValueError, "Input vector must be larger than window size.")
-    s = np.r_[x[window_len-1:0:-1], x, x[-2:-window_len-1:-1]]
     w = np.hanning(window_len)
-    y = np.convolve(w/w.sum(), s, mode='valid')
-    return y[window_radius:len(x) + window_radius]
+    
+    if len(x.shape) > 1:
+        s = np.r_['1', x[:,window_len-1:0:-1], x, x[:,-2:-window_len-1:-1]]
+        y = np.zeros((x.shape[0], s.shape[1] - len(w) + 1))
+        for i in range(x.shape[0]):
+            y[i,:] = np.convolve(s[i,:], w/w.sum(), mode='valid')
+        return y[:,window_radius:x.shape[-1] + window_radius]
+    
+    else:
+        s = np.r_[x[window_len-1:0:-1], x, x[-2:-window_len-1:-1]]
+        y = np.convolve(s, w/w.sum(), mode='valid')
+        return y[window_radius:x.shape[-1] + window_radius]
 
 #################################################################################################################
 
@@ -225,7 +235,7 @@ def get_predictions(model, data_loaders, d_sets, device, height, width, num_feat
     
     df = pd.DataFrame({'set': [j for i in [[d_set]*len(data_loaders[d_set].dataset) for d_set in d_sets] for j in i]})
 
-    xs, x_preds, x_mses, zs, z_mses, ys, y_preds, y_mses = [], [], [], [], [], [], [], []
+    xs, x_preds, x_mses, zs, z_mses, ys, y_preds, y_errs = [], [], [], [], [], [], [], []
     for d_set in d_sets:
         # initialize arrays
         x_pred = np.zeros((len(data_loaders[d_set].dataset), height, width))
@@ -236,26 +246,26 @@ def get_predictions(model, data_loaders, d_sets, device, height, width, num_feat
         else: z_mse = None
 
         if model_name == 'rvae':
-            y_pred = np.zeros((len(data_loaders[d_set].dataset), num_features + 1))
-            y_mse = np.zeros((len(data_loaders[d_set].dataset), num_features))
+            y_pred = np.zeros((len(data_loaders[d_set].dataset), num_features))
+            y_err = np.zeros((len(data_loaders[d_set].dataset), num_features))
 
             # predict
-            predict(model, data_loaders[d_set], device, y_ids, x_pred, z, x_mse, y_pred, y_mse=y_mse, z_mse=z_mse)
+            predict(model, data_loaders[d_set], device, y_ids, x_pred, z, x_mse, y_pred, y_err=y_err, z_mse=z_mse)
 
             # invert standardization
-            y_pred[:,:-1] = scaler.inverse_transform(y_pred[:,:-1])
-            y_mse = scaler.inverse_transform(y_mse)
+            y_pred = scaler.inverse_transform(y_pred)
+            y_err = scaler.inverse_transform(y_err) - scaler.mean_
 
         elif model_name == 'cvae':
             y_pred = np.zeros((len(data_loaders[d_set].dataset), 1))
-            y_mse = None
+            y_err = None
 
             # predict
             predict(model, data_loaders[d_set], device, y_ids, x_pred, z, x_mse, y_pred, z_mse=z_mse)
 
         else:
             y_pred = None
-            y_mse = None
+            y_err = None
 
             # predict
             predict(model, data_loaders[d_set], device, y_ids, x_pred, z, x_mse, z_mse=z_mse)
@@ -276,7 +286,7 @@ def get_predictions(model, data_loaders, d_sets, device, height, width, num_feat
         x_mses += [x_mse]
         z_mses += [z_mse]
         y_preds += [y_pred]
-        y_mses += [y_mse]
+        y_errs += [y_err]
     
     df['x_true'] = [k for k in np.concatenate(xs, axis=0).squeeze()]
     df['x_pred'] = [k for k in np.concatenate(x_preds, axis=0).squeeze()]
@@ -287,9 +297,9 @@ def get_predictions(model, data_loaders, d_sets, device, height, width, num_feat
     except: pass
     else: df['y_pred'] = [k for k in np.concatenate(y_preds, axis=0)]
 
-    try: len(y_mses[0])
+    try: len(y_errs[0])
     except: pass
-    else: df['y_mse'] = [k for k in np.concatenate(y_mses, axis=0)]
+    else: df['y_err'] = [k for k in np.concatenate(y_errs, axis=0)]
 
     df['z'] = [k for k in np.concatenate(zs, axis=0)]
 
@@ -305,30 +315,30 @@ def get_predictions_exp(model, x_exp, exp_names, device, height, width, num_feat
     
     temps = [i[i.index('/')+1:] for i in exp_names]
     df = pd.DataFrame({'set': temps,
-                       'x_true': [k for k in x_exp.squeeze().numpy()]})
+                       'x_true': [k for k in x_exp.squeeze(1).numpy()]})
     
     x_exp_pred = np.zeros((x_exp.shape[0], height, width))
     z_exp = np.zeros((x_exp.shape[0], kwargs['latent_dim']))
-    x_mse = np.zeros((x_exp.shape[0],))
+    x_exp_mse = np.zeros((x_exp.shape[0],))
     
     if model_name == 'rvae':
-        y_exp_pred = np.zeros((x_exp.shape[0], num_features + 1))
-        predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_mse, y_exp_pred)
-        y_exp_pred[:,:-1] = scaler.inverse_transform(y_exp_pred[:,:-1])
+        y_exp_pred = np.zeros((x_exp.shape[0], num_features))
+        predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_exp_mse, y_exp_pred)
+        y_exp_pred = scaler.inverse_transform(y_exp_pred)
 
     elif model_name == 'cvae':
         y_exp_pred = np.zeros((x_exp.shape[0], 1))
-        predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_mse, y_exp_pred)
+        predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_exp_mse, y_exp_pred)
 
     else:
         y_exp_pred = None
-        predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_mse)
+        predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_exp_mse)
 
     if not z_std_norm:
         z_exp[:,:len(y_ids)-1] = scaler.inverse_transform(z_exp[:,:len(y_ids)-1])
     
-    df['x_pred'] = [k for k in x_exp_pred.squeeze()]
-    df['x_mse'] = [k for k in x_exp_pred]
+    df['x_pred'] = [k for k in x_exp_pred]
+    df['x_mse'] = [k for k in x_exp_mse]
     try: len(y_exp_pred)
     except: pass
     else: df['y_pred'] = [k for k in y_exp_pred]
@@ -456,33 +466,120 @@ def plot_decoded_exp(image_dir, x_pred, exp_names, q, x_moms):
     prop_text = prop.copy()
     prop_text.set_size(14)
 
-    fig, (ax1, ax2) = plt.subplots(1,2, figsize=(9.5,5), sharey=True)
+    if len(temps) > 1:
+        fig, (ax1, ax2) = plt.subplots(1,2, figsize=(9.5,5), sharey=True)
 
-    for i in range(x_pred.shape[0]):
-        xdata_uu = 'experiments/' + exp_names[i] + '/x_uu.dat'
-        xdata_dd = 'experiments/' + exp_names[i] + '/x_dd.dat'
-        df_uu = read_exp(xdata_uu)
-        df_dd = read_exp(xdata_dd)
-        
-        ax1.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,0], x_moms), color=cmap_temp(norm(temps[i])))
-        ax2.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,1], x_moms), color=cmap_temp(norm(temps[i])))
-        
+        for i in range(x_pred.shape[0]):
+            xdata_uu = 'experiments/' + exp_names[i] + '/x_uu.dat'
+            xdata_dd = 'experiments/' + exp_names[i] + '/x_dd.dat'
+            df_uu = read_exp(xdata_uu)
+            df_dd = read_exp(xdata_dd)
+            
+            ax1.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,0], x_moms), color=cmap_temp(norm(temps[i])))
+            ax2.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,1], x_moms), color=cmap_temp(norm(temps[i])))
+            
 
-        ax1.errorbar(10*df_uu['Q'].values, 10**i*df_uu['R'].values, yerr=df_uu['dR'].values, lw=0, elinewidth=1,
-                     color=cmap_temp(norm(temps[i])))
-        ax2.errorbar(10*df_dd['Q'].values, 10**i*df_dd['R'].values, yerr=df_dd['dR'].values, lw=0, elinewidth=1,
-                     color=cmap_temp(norm(temps[i])))
-        ax1.scatter(10*df_uu['Q'].values, 10**i*df_uu['R'].values, s=24, color=cmap_temp(norm(temps[i])),
-                    ec='none', label=str(temps[i]) + 'K')
-        ax2.scatter(10*df_dd['Q'].values, 10**i*df_dd['R'].values, s=24, color=cmap_temp(norm(temps[i])),
-                    ec='none', label=str(temps[i]) + 'K')
+            ax1.errorbar(10*df_uu['Q'].values, 10**i*df_uu['R'].values, yerr=df_uu['dR'].values, lw=0, elinewidth=1,
+                         color=cmap_temp(norm(temps[i])))
+            ax2.errorbar(10*df_dd['Q'].values, 10**i*df_dd['R'].values, yerr=df_dd['dR'].values, lw=0, elinewidth=1,
+                         color=cmap_temp(norm(temps[i])))
+            ax1.scatter(10*df_uu['Q'].values, 10**i*df_uu['R'].values, s=24, color=cmap_temp(norm(temps[i])),
+                        ec='none', label=str(temps[i]) + 'K')
+            ax2.scatter(10*df_dd['Q'].values, 10**i*df_dd['R'].values, s=24, color=cmap_temp(norm(temps[i])),
+                        ec='none', label=str(temps[i]) + 'K')
 
-    ax1.legend(frameon=False, ncol=2, prop=prop_text, loc='upper right', columnspacing=1.4, handletextpad=0.4)
-    ax2.legend(frameon=False, ncol=2, prop=prop_text, loc='upper right', columnspacing=1.4, handletextpad=0.4)
-    ax1.set_yscale('log')
-    ax2.set_yscale('log')
-    format_axis(ax1, 'Q (nm$^{-1}$)', 'Reflectivity', prop, 'R$^{++}$', [q.min(), q.max()])
-    format_axis(ax2, 'Q (nm$^{-1}$)', ' ', prop, 'R$^{--}$', [q.min(), q.max()])
+        ax1.legend(frameon=False, ncol=2, prop=prop_text, loc='upper right', columnspacing=1.4, handletextpad=0.4)
+        ax2.legend(frameon=False, ncol=2, prop=prop_text, loc='upper right', columnspacing=1.4, handletextpad=0.4)
+        ax1.set_yscale('log')
+        ax2.set_yscale('log')
+        format_axis(ax1, 'Q (nm$^{-1}$)', 'Reflectivity', prop, 'R$^{++}$', [q.min(), q.max()])
+        format_axis(ax2, 'Q (nm$^{-1}$)', ' ', prop, 'R$^{--}$', [q.min(), q.max()])
+
+    else:
+        fig, ax = plt.subplots(1,1, figsize=(5.5,5))
+
+        for i in range(x_pred.shape[0]):
+            xdata_uu = 'experiments/' + exp_names[i] + '/x_uu.dat'
+            xdata_dd = 'experiments/' + exp_names[i] + '/x_dd.dat'
+            df_uu = read_exp(xdata_uu)
+            df_dd = read_exp(xdata_dd)
+            
+            p1, = ax.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,0], x_moms), color='#316986')
+            p2, = ax.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,1], x_moms), color='#C86646')
+            
+
+            ax.errorbar(10*df_uu['Q'].values, 10**i*df_uu['R'].values, yerr=df_uu['dR'].values, lw=0, elinewidth=1,
+                        color='#316986')
+            s1 = ax.scatter(10*df_uu['Q'].values, 10**i*df_uu['R'].values, s=24, color='#316986',
+                            ec='none', label='R$^{++}$')
+            ax.errorbar(10*df_dd['Q'].values, 10**i*df_dd['R'].values, yerr=df_dd['dR'].values, lw=0, elinewidth=1,
+                        color='#C86646')
+            s2 = ax.scatter(10*df_dd['Q'].values, 10**i*df_dd['R'].values, s=24, color='#C86646',
+                            ec='none', label='R$^{--}$')
+
+        ax.legend([s1, p1, s2, p2], ['R$^{++}$', 'Pred.', 'R$^{--}$', 'Pred.'], frameon=False, ncol=2, prop=prop_text,
+                  loc='lower left', columnspacing=1)
+        ax.set_yscale('log')
+        format_axis(ax, 'Q (nm$^{-1}$)', 'Reflectivity', prop, '', [q.min(), q.max()])
+
+
+        # zoom inset 1
+        fig_, ax_ = plt.subplots(1,1, figsize=(5.5/1.5,5/2.))
+
+        for i in range(x_pred.shape[0]):
+            xdata_uu = 'experiments/' + exp_names[i] + '/x_uu.dat'
+            xdata_dd = 'experiments/' + exp_names[i] + '/x_dd.dat'
+            df_uu = read_exp(xdata_uu)
+            df_dd = read_exp(xdata_dd)
+            
+            p1, = ax_.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,0], x_moms), color='#316986')
+            p2, = ax_.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,1], x_moms), color='#C86646')
+            
+
+            ax_.errorbar(10*df_uu['Q'].values, 10**i*df_uu['R'].values, yerr=df_uu['dR'].values, lw=0, elinewidth=1,
+                         color='#316986')
+            s1 = ax_.scatter(10*df_uu['Q'].values, 10**i*df_uu['R'].values, s=24, color='#316986',
+                             ec='none', label='R$^{++}$')
+            ax_.errorbar(10*df_dd['Q'].values, 10**i*df_dd['R'].values, yerr=df_dd['dR'].values, lw=0, elinewidth=1,
+                         color='#C86646')
+            s2 = ax_.scatter(10*df_dd['Q'].values, 10**i*df_dd['R'].values, s=24, color='#C86646',
+                             ec='none', label='R$^{--}$')
+
+        ax_.set_yscale('log')
+        format_axis(ax_, 'Q (nm$^{-1}$)', 'Refl.', prop, '', [1, q.max()], [1e-6, 5e-5])
+
+        fig_.tight_layout()
+        fig_.subplots_adjust(wspace=0.1)
+        fig_.savefig(image_dir + '/decoded_exp_inset1.pdf')
+
+        # zoom inset 2
+        fig_, ax_ = plt.subplots(1,1, figsize=(5.5/1.5,5/2.))
+
+        for i in range(x_pred.shape[0]):
+            xdata_uu = 'experiments/' + exp_names[i] + '/x_uu.dat'
+            xdata_dd = 'experiments/' + exp_names[i] + '/x_dd.dat'
+            df_uu = read_exp(xdata_uu)
+            df_dd = read_exp(xdata_dd)
+            
+            p1, = ax_.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,0], x_moms), color='#316986')
+            p2, = ax_.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,1], x_moms), color='#C86646')
+            
+
+            ax_.errorbar(10*df_uu['Q'].values, 10**i*df_uu['R'].values, yerr=df_uu['dR'].values, lw=0, elinewidth=1,
+                         color='#316986')
+            s1 = ax_.scatter(10*df_uu['Q'].values, 10**i*df_uu['R'].values, s=24, color='#316986',
+                             ec='none', label='R$^{++}$')
+            ax_.errorbar(10*df_dd['Q'].values, 10**i*df_dd['R'].values, yerr=df_dd['dR'].values, lw=0, elinewidth=1,
+                         color='#C86646')
+            s2 = ax_.scatter(10*df_dd['Q'].values, 10**i*df_dd['R'].values, s=24, color='#C86646',
+                             ec='none', label='R$^{--}$')
+
+        ax_.set_yscale('log')
+        format_axis(ax_, 'Q (nm$^{-1}$)', 'Refl.', prop, '', [0.6, 1.], [1e-5, 2e-4])
+
+        fig_.tight_layout()
+        fig_.subplots_adjust(wspace=0.1)
+        fig_.savefig(image_dir + '/decoded_exp_inset2.pdf')
 
     fig.tight_layout()
     fig.subplots_adjust(wspace=0.1)
@@ -490,27 +587,27 @@ def plot_decoded_exp(image_dir, x_pred, exp_names, q, x_moms):
 
 #################################################################################################################
 
-def plot_predicted(image_dir, y_pred, y_true, y_mse, y_ids, y_labels, y_units):
+def plot_predicted(image_dir, y_pred, y_true, y_err, y_ids, y_labels, y_units, title=r'$L_1$'):
     prop.set_size(14)
     if len(y_ids) > 15: n = 5
     else: n = 3
     w = int((len(y_ids) + (len(y_ids)%n > 0)*(n - len(y_ids)%n))/n)
-    fig = plt.figure(figsize=(3.2*w, n*2.67))
+    fig = plt.figure(figsize=(3.3*w, n*2.67))
     cmap_mse = truncate_colormap(mpl.cm.get_cmap('bone_r'), minval=0.2, maxval=0.8)
     
     for k in range(len(y_ids)-1):
         ax = fig.add_subplot(n, w, k+1)
-        norm = mpl.colors.Normalize(vmin=np.sqrt(y_mse[:,k]).min(), vmax=np.sqrt(y_mse[:,k]).max())
+        norm = mpl.colors.Normalize(vmin=y_err[:,k].min(), vmax=y_err[:,k].max())
 
-        g = ax.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=np.sqrt(y_mse[:,k]), s=10, cmap=cmap_mse, norm=norm)
+        g = ax.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=y_err[:,k], s=10, cmap=cmap_mse, norm=norm)
         cbar = fig.colorbar(g, ax=ax, aspect=12)
-        cbar.ax.set_title('RMSE ' + y_units[k], fontproperties=prop)
+        cbar.ax.set_title(title + ' ' + y_units[k], fontproperties=prop)
         cbar.ax.tick_params(direction='in', length=6, width=1)
         for lab in cbar.ax.get_yticklabels():
             lab.set_fontproperties(prop)
         cbar.outline.set_visible(False)
         ax.clear()
-        ax.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=np.sqrt(y_mse[:,k]), s=10, alpha=0.1, cmap=cmap_mse, norm=norm)
+        ax.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=y_err[:,k], s=10, alpha=0.1, cmap=cmap_mse, norm=norm)
         
         ax.text(0.075, 0.9, y_labels[k], ha='left', va='center', transform=ax.transAxes, fontproperties=prop)
         
@@ -518,16 +615,74 @@ def plot_predicted(image_dir, y_pred, y_true, y_mse, y_ids, y_labels, y_units):
         ax.locator_params(tight=True, nbins=4)
         ax.set_aspect('equal')
         
-        x_min = min(y_true[:,y_ids[k]].min(), y_pred[:,k].min())
-        x_max = max(y_true[:,y_ids[k]].max(), y_pred[:,k].max())
+        x_min = min(y_true[:,y_ids[k]].min(), y_pred[:,k].min()) - 0.2
+        x_max = max(y_true[:,y_ids[k]].max(), y_pred[:,k].max()) + 0.2
         ax.set_xlim([x_min, x_max])
         ax.set_ylim([x_min, x_max])
         ax.plot([x_min, x_max], [x_min, x_max], color='black', linestyle='--')
             
     fig.tight_layout()
-    fig.subplots_adjust(wspace=0.15, hspace=0.3)
+    fig.subplots_adjust(wspace=0.2, hspace=0.3)
     fig.savefig(image_dir + '/predicted.png', dpi=400)
 
+
+def plot_predicted_property(image_dir, y_pred, y_true, y_err, y_name, y_header, y_ids, y_labels, y_units, title=r'$L_1$'):
+    prop.set_size(14)
+    tprop = prop.copy()
+    tprop.set_size(12)
+    fig, (ax1, ax2) = plt.subplots(1,2, figsize=(1.2*4.8, 1.2*2.67), gridspec_kw=dict(width_ratios=[2,1]))
+    
+    k = y_header.index(y_name)
+    cmap_mse = truncate_colormap(mpl.cm.get_cmap('bone_r'), minval=0.1, maxval=0.8) 
+    norm = mpl.colors.Normalize(vmin=y_err[:,k].min(), vmax=y_err[:,k].max())
+
+    # predicted vs. true values
+    g = ax1.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=y_err[:,k], s=10, cmap=cmap_mse, norm=norm)
+    cbar = fig.colorbar(g, ax=ax1, aspect=12)
+    cbar.ax.set_title(title + ' ' + y_units[k], fontproperties=prop)
+    cbar.ax.tick_params(direction='in', length=6, width=1)
+    for lab in cbar.ax.get_yticklabels():
+        lab.set_fontproperties(prop)
+    cbar.outline.set_visible(False)
+    ax1.clear()
+    ax1.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=y_err[:,k], s=10, alpha=0.1, cmap=cmap_mse, norm=norm)
+    
+    #ax1.text(0.075, 0.9, y_labels[k], ha='left', va='center', transform=ax1.transAxes, fontproperties=prop)
+    
+    format_axis(ax1, 'true ' + y_labels[k], 'pred. ' + y_labels[k], prop)
+    ax1.locator_params(tight=True, nbins=6)
+    ax1.set_aspect('equal')
+    
+    x_min = min(y_true[:,y_ids[k]].min(), y_pred[:,k].min()) - 0.2
+    x_max = max(y_true[:,y_ids[k]].max(), y_pred[:,k].max()) + 0.2
+    ax1.set_xlim([x_min, x_max])
+    ax1.set_ylim([x_min, x_max])
+    ax1.plot([x_min, x_max], [x_min, x_max], color='black', linestyle='--')
+    
+    # error distribution
+    y_min, y_max = y_err[:,k].min(), y_err[:,k].max()
+    n = 1000
+    yy = np.linspace(y_min, y_max, n)
+    kde = gaussian_kde(y_err[:,k])
+    py = kde.pdf(yy)
+    ax2.plot(py, yy, color='black')
+
+    # plot quartiles
+    qs = (0.25, 0.5, 0.75, 0.95)
+    quartiles = np.quantile(y_err[:,k], qs)
+    for i, q in enumerate(quartiles):
+        ax2.axhline(q, linestyle='--', color='gray')
+        if i > 0:
+            ax2.text(4, q, '{:.2f}'.format(qs[i]), color='gray', fontproperties=tprop, ha='left', va='center',
+                     bbox=dict(facecolor='white', edgecolor='white', pad=0.05))
+
+    format_axis(ax2, 'pdf', '', prop, nbins=3)
+    ax2.set_ylim([y_min, y_max])
+    ax2.set_yticklabels([])
+
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=0.15)
+    fig.savefig(image_dir + '/predicted_' + y_name + '.png', dpi=400)
 
 def get_roc(df, d_sets):
     fpr = []; tpr = []; roc_auc = []; th = []
@@ -668,7 +823,10 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
         n_exp = z_exp.shape[0]
         exp_names = [i[i.index('/')+1:] for i in exp_names]
         temps = [int(k[:-1]) for k in exp_names]
-        norm = mpl.colors.LogNorm(vmin=min(temps), vmax=max(temps))
+        if len(temps) > 1:
+            norm = mpl.colors.LogNorm(vmin=min(temps), vmax=max(temps))
+        else:
+            norm = mpl.colors.LogNorm(vmin=1, vmax=max(temps))
     
     xd = x_data[::d,:]
     for k in range(len(y_ids)):
@@ -719,7 +877,7 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
             else: z_proj = mds.transform(z_exp)
 
             for i in range(n_exp):
-                ax.scatter(z_proj[[i],0], z_proj[[i],1], color=cmap_temp(norm(temps[i])), ec='black', s=28)
+                ax.scatter(z_proj[[i],0], z_proj[[i],1], color=cmap_temp(norm(temps[i])), ec='black', s=36)
                 
         ax.text(0.075, 0.9, y_labels[k], ha='left', va='center', transform=ax.transAxes, fontproperties=prop)
 
@@ -760,11 +918,16 @@ def plot_class_exp_statistics(image_dir, df_exp, reps):
     fig.tight_layout()
     fig.savefig(image_dir + '/class_distribution_exp.pdf')
 
+
 def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_units, y_th=None):
     # plot statistics of parameter in given column of latent representation z
     column = y_header.index(y_name)
     df_exp['temperature'] = df_exp['set'].map(lambda x: int(x[:-1]))
-    df_exp['p'] = df_exp['z'].map(lambda x: x[column])
+
+    if 'y_pred' in df_exp.columns:
+        df_exp['p'] = df_exp['y_pred'].map(lambda x: x[column])
+    else:
+        df_exp['p'] = df_exp['z'].map(lambda x: x[column])
     
     if y_th != None:
         df_exp['p_dist'] = df_exp['p'] - y_th
@@ -780,15 +943,18 @@ def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_u
     else:
         df_exp['palette'] = '#6A96A9'
 
-    fig, ax = plt.subplots(figsize=(7.8,3.2))
+    #fig, ax = plt.subplots(figsize=(7.8,3.2))
+    fig, ax = plt.subplots(figsize=(6.5,3.2))
     prop.set_size(14)
 
     sns.violinplot(ax=ax, x='temperature', y='p', width=0.6, scale='count', data=df_exp,
                    inner=None, saturation=0.9, palette=df_exp['palette'].tolist(), linewidth=0)
 
     if y_th != None:
-        g = sns.swarmplot(ax=ax, x='temperature', y='p', hue='p_class', data=df_exp,
+        g = sns.stripplot(ax=ax, x='temperature', y='p', hue='p_class', data=df_exp, jitter=0.05,
                           palette={0: cmap_disc(0), 1: cmap_disc(1)}, edgecolor='black', linewidth=1)
+        #g = sns.swarmplot(ax=ax, x='temperature', y='p', hue='p_class', data=df_exp, jitter=0.05,
+        #                  palette={0: cmap_disc(0), 1: cmap_disc(1)}, edgecolor='black', linewidth=1)
         g.legend_.remove()
         ax.axhline(y_th, linestyle='--', color='#ADABA4')
     else:

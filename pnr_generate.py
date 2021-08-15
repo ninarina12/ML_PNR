@@ -3,6 +3,7 @@ import pandas as pd
 import time
 import os, sys
 import copy
+
 from scipy.interpolate import interp1d
 from mpi4py import MPI
 
@@ -85,13 +86,14 @@ def format_parameters(b_sub, b_main1, b_main2, b_cap,
 	
 	return b, dens, ddens, v, dv, stack, dstack
 	
-def format_metadata(sample_name, structure, layer_names, N, q_min, q_max, wavelen,
+def format_metadata(sample_name, structure, layer_names, rho, M, N, q_min, q_max, wavelen,
 					res, dres, log_bkg, dlog_bkg, stack, dstack, prox):
 
 	layers = ['(0) substrate', '(1) main 1', '(2) main 2', '(3) capping']
-	properties = ['density (fu/A^3)', 'thickness (A)', 'roughness (A)', 'magnetization (uB)']
+	properties = ['density (fu/A^3)', 'thickness (A)', 'roughness (A)', 'magnetization (uB/fu)']
 
 	meta = {'PARAMETERS': {'sample': sample_name, 'structure': structure, 'layers': NoIndent(layer_names),
+			'densities (g/cm^3)': NoIndent(rho), 'molar masses (g/mol)': NoIndent(M),
 			'number of q-points': N, 'q_min (A^-1)': q_min, 'q_max (A^-1)': q_max, 'wavelength (A)': wavelen,
 			'resolution': NoIndent([res, dres]), 'background (log)': NoIndent([log_bkg, dlog_bkg])}}
 
@@ -117,8 +119,8 @@ def read_exp(file_name):
 ################################################### constants ###################################################
 
 # name of experiment sample, name of function to build sample stack, maximum q (A^-1), neutron wavelength (A)
-#sample_name, structure, q_max, wavelen = 'BiSe10_EuS5', 'Al2O3_Bi2Se3_EuS_aAl2O3', 0.13, 4.75
-sample_name, structure, q_max, wavelen = 'CrO20_BiSbTe20', 'Al2O3_Cr2O3_BiSb2Te3_Te_TeO2', 0.17, 5.35
+sample_name, structure, q_max, wavelen = 'BiSe10_EuS5', 'Al2O3_Bi2Se3_EuS_aAl2O3', 0.13, 4.75
+#sample_name, structure, q_max, wavelen = 'CrO20_BiSbTe20', 'Al2O3_Cr2O3_BiSb2Te3_Te_TeO2', 0.172, 5.35
 
 N = 256                                                 # number of q points for reflectivity plot
 q_min = 0.01
@@ -146,6 +148,7 @@ cp = UserVars()
 ############################################# experiment properties #############################################
 
 exp_names = next(os.walk('experiments/' + sample_name))[1]
+exp_names = [k for k in exp_names if '-' not in k]
 exp_names = [exp_names[j] for j in np.argsort([int(i[:i.index('K')]) for i in exp_names])]
 
 # we will use the lowest temperature measurement for noise estimates
@@ -157,39 +160,45 @@ q_exp = df['Q'].values
 # variables (v) = [d, s, magn]
 
 # b = neutron scattering length
-# dens = density (g/cm^3)/u/molar mass of compound (g/mol)
+# dens = density (g/cm^3)/u/molar mass of compound (g/mol) = density (fu/A^3)
 # d = layer thickness (A)
 # s = roughness of layer top surface (A)
-# magn = magnetization (uB)
+# magn = magnetization (uB/fu)
 
 def Al2O3_Bi2Se3_EuS_aAl2O3():
 	# layers
 	layer_names = ['$Al_2O_3$', '$Bi_2Se_3$', '$Bi_2Se_3$\ninterface', 'EuS', r'$\alpha-Al_2O_3$']
+	
+	# nominal densities (g/cm^3)
+	rho = [3.95, 6.82, 6.82, 5.75, 2.75]
+
+	# molar masses (g/mol)
+	M = [101.96, 654.8, 654.8, 184.03, 101.96]
 
 	# sub
 	b_sub = bc.Al*2+bc.O*3
-	dens_sub = np.array([[3.95/u/101.96]])
+	dens_sub = np.array([[rho[0]/u/M[0]]])
 	ddens_sub = 0.05*dens_sub
 	v_sub = np.array([[0, 4., 0]])
 	dv_sub = np.array([[0, 4., 0]])
 
 	# main1 (2 layers)
 	b_main1 = bc.Bi*2+bc.Se*3
-	dens_main1 = np.array([[6.82/u/654.8]])
+	dens_main1 = np.array([[rho[1]/u/M[1]]])
 	ddens_main1 = 0.2*dens_main1
-	v_main1 = np.array([[100., 7., 0], [20., 5., 3.]])
-	dv_main1 = np.array([[20., 7., 0], [10., 5., 2.]])
+	v_main1 = np.array([[100., 7., 0], [20., 5., 1.]])
+	dv_main1 = np.array([[20., 7., 0], [10., 5., 0.5]])
 	
 	# main2
 	b_main2 = bc.Eu+bc.S
-	dens_main2 = np.array([[5.75/u/184.03]])
+	dens_main2 = np.array([[rho[3]/u/M[3]]])
 	ddens_main2 = 0.2*dens_main2
 	v_main2 = np.array([[60., 8., 4.]])
 	dv_main2 = np.array([[20., 4., 4.]])
 
 	# cap
 	b_cap = [bc.Al*2+bc.O*3]
-	dens_cap = np.array([[2.75/u/101.96]])
+	dens_cap = np.array([[rho[4]/u/M[4]]])
 	ddens_cap = np.array([[0.5]])*dens_cap
 	v_cap = np.array([[100., 10., 0]])
 	dv_cap = np.array([[30., 4., 0]])
@@ -210,7 +219,7 @@ def Al2O3_Bi2Se3_EuS_aAl2O3():
 															 dv_sub, dv_main1, dv_main2, dv_cap)
 	
 	# create metadata
-	meta = format_metadata(sample_name, structure, layer_names, N, q_min, q_max, wavelen,
+	meta = format_metadata(sample_name, structure, layer_names, rho, M, N, q_min, q_max, wavelen,
 						   res, dres, log_bkg, dlog_bkg, stack, dstack, prox)
 
 	return b, dens, ddens, v, dv, prox, header, meta
@@ -219,30 +228,36 @@ def Al2O3_Cr2O3_BiSb2Te3_Te_TeO2():
 	# layers
 	layer_names = ['$Al_2O_3$', '$Cr_2O_3$', '$Cr_2O_3$\ninterface', 'TI\ninterface', 'TI', 'Te', '$TeO_2$']
 
+	# nominal densities (g/cm^3)
+	rho = [3.95, 5.22, 5.22, 0.2*7.7 + 0.8*6.5, 0.2*7.7 + 0.8*6.5, 6.24, 5.67]
+
+	# molar masses (g/mol)
+	M = [101.96, 151.99, 151.99, 0.2*800.76 + 0.8*626.32, 0.2*800.76 + 0.8*626.32, 127.6, 159.6]
+
 	# sub
 	b_sub = bc.Al*2+bc.O*3
-	dens_sub = np.array([[3.95/u/101.96]])
+	dens_sub = np.array([[rho[0]/u/M[0]]])
 	ddens_sub = 0.05*dens_sub
 	v_sub = np.array([[0, 4., 0]])
 	dv_sub = np.array([[0, 4., 0]])
 
 	# main1 (2 layers)
 	b_main1 = bc.Cr*2+bc.O*3
-	dens_main1 = np.array([[5.22/u/151.99]])
-	ddens_main1 = 0.3*dens_main1
+	dens_main1 = np.array([[rho[1]/u/M[1]]])
+	ddens_main1 = 0.2*dens_main1
 	v_main1 = np.array([[200., 10., 0], [20., 5., 0.6]])
 	dv_main1 = np.array([[20., 8., 0], [10., 5., 0.4]])
 	
 	# main2 (2 layers)
 	b_main2 = bc.Bi*0.4+bc.Sb*1.6+bc.Te*3
-	dens_main2 = np.array([[0.2*(7.7/u/800.76) + 0.8*(6.5/u/626.32)]])
+	dens_main2 = np.array([[rho[3]/u/M[3]]])
 	ddens_main2 = 0.3*dens_main2
 	v_main2 = np.array([[20., 5., 0.6], [180., 20., 0.]])
 	dv_main2 = np.array([[10., 5., 0.4], [20., 10., 0.]])
 
 	# cap
 	b_cap = [bc.Te, bc.Te+bc.O*2]
-	dens_cap = np.array([[6.24/u/127.6], [5.67/u/159.6]])
+	dens_cap = np.array([[rho[5]/u/M[5]], [rho[6]/u/M[6]]])
 	ddens_cap = np.array([[0.5], [0.5]])*dens_cap
 	v_cap = np.array([[90., 20., 0], [25., 25., 0]])
 	dv_cap = np.array([[20., 10., 0], [10., 10., 0]])
@@ -264,7 +279,7 @@ def Al2O3_Cr2O3_BiSb2Te3_Te_TeO2():
 															 dv_sub, dv_main1, dv_main2, dv_cap)
 
 	# create metadata
-	meta = format_metadata(sample_name, structure, layer_names, N, q_min, q_max, wavelen,
+	meta = format_metadata(sample_name, structure, layer_names, rho, M, N, q_min, q_max, wavelen,
 						   res, dres, log_bkg, dlog_bkg, stack, dstack, prox)
 
 	return b, dens, ddens, v, dv, prox, header, meta
@@ -469,6 +484,7 @@ with open(xdata_uu, 'w') as fx1, open(xdata_dd, 'w') as fx2, open(ydata, 'w') as
 		cap = np.concatenate([dens_cap, v_cap], axis=1)
 
 		# organize and convert parameters for saving
+		# saved units: density (fu/nm^3), thickness (nm), roughness (nm), magnetization (uB/fu)
 		stack = np.concatenate([sub, main1, main2, cap], axis=0)
 		dens, d, s, magn = list(1E3*stack[:,0]), list(0.1*stack[:,1]), list(0.1*stack[:,2]), list(stack[:,3])
 		p = dens + d + s + magn

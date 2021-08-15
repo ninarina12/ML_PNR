@@ -37,7 +37,7 @@ def format_axis(ax, xlabel, ylabel, props, title=None, xlims=None, ylims=None, n
     for lab in ax.get_yticklabels():
         lab.set_fontproperties(props)
 
-palette = ['#316986', '#408885', '#AAA850', '#F2B959']
+palette = ['#283C73', '#316986', '#408885', '#AAA850', '#F2B959']
 cmap = LinearSegmentedColormap.from_list('cmap', palette)
 cmap_temp = LinearSegmentedColormap.from_list('cmap_temp', ['#316986', '#C4C2C3', '#C86646'])
 cnorm = mpl.colors.Normalize(vmin=0, vmax=1)

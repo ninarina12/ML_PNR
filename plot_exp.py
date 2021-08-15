@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import os, sys
+
 from scipy.interpolate import interp1d
 from plot_imports import *
 
@@ -20,7 +21,7 @@ enablePrint()
 
 # name of experiment sample, name of function to build sample stack, maximum q (A^-1), neutron wavelength (A)
 #sample_name, structure, q_max, wavelen, res, Ibkg = 'BiSe10_EuS5', 'Al2O3_Bi2Se3_EuS_aAl2O3', 0.13, 4.75, 5e-4, 3.35e-6
-sample_name, structure, q_max, wavelen, res, Ibkg = 'CrO20_BiSbTe20', 'Al2O3_Cr2O3_BiSb2Te3_Te_TeO2', 0.17, 5.35, 1e-3, 1e-6
+sample_name, structure, q_max, wavelen, res, Ibkg = 'CrO20_BiSbTe20', 'Al2O3_Cr2O3_BiSb2Te3_Te_TeO2_1', 0.175, 5.35, 1e-3, 1e-6
 
 T = 5													# temperature of experiment sample
 scale = 5												# amount by which to scale MSLD and ASLD in plot
@@ -99,7 +100,49 @@ def Al2O3_Bi2Se3_EuS_aAl2O3():
 
 	return layer_names, layer_bounds, b, sub, main1, main2, cap
 
-def Al2O3_Cr2O3_BiSb2Te3_Te_TeO2():
+def Al2O3_Cr2O3_BiSb2Te3_Te_TeO2_1():
+	# layers
+	layer_names = ['$Al_2O_3$', '$Cr_2O_3$', '$(Bi_{0.2}Sb_{0.8})_2Te_3$', 'Te/$TeO_2$']
+
+	# sub
+	b_sub = bc.Al*2+bc.O*3
+	dens_sub = 0.0234659668836
+	d_sub = 0
+	s_sub = 7.723712576
+	magn_sub = 0
+	sub = np.array([dens_sub, d_sub, s_sub, magn_sub])
+
+	# main1 (2 layers)
+	b_main1 = bc.Cr*2+bc.O*3
+	dens_main1 = [0.020916086, 0.019229117]
+	d_main1 = [204.489681962, 1.513013109]
+	s_main1 = [2.070698989, 2.356131051]
+	magn_main1 = [0, 0.002872398]
+	main1 = np.array([dens_main1, d_main1, s_main1, magn_main1]).T
+
+	# main2 (2 layers)
+	b_main2 = bc.Bi*0.4+bc.Sb*1.6+bc.Te*3
+	dens_main2 = [0.007884025, 0.005542201]
+	d_main2 = [0.660577660, 168.548082301]
+	s_main2 = [9.898259001, 27.810012858]
+	magn_main2 = [0.450396569, 0]
+	main2 = np.array([dens_main2, d_main2, s_main2, magn_main2]).T
+
+	# cap
+	b_cap = [bc.Te, bc.Te+bc.O*2]
+	dens_cap = [0.023707620, 0.016248761]
+	d_cap = [114.528489577, 21.721019963]
+	s_cap = [23.748065946, 20.547390031]
+	magn_cap = [0, 0]
+	cap = np.array([dens_cap, d_cap, s_cap, magn_cap]).T
+
+	b = [b_sub, b_main1, b_main2, b_cap]
+	
+	layer_bounds = [0, sum(d_main1), sum(d_main1) + sum(d_main2), sum(d_main1) + sum(d_main2) + 1.5*sum(d_cap)]
+
+	return layer_names, layer_bounds, b, sub, main1, main2, cap
+
+def Al2O3_Cr2O3_BiSb2Te3_Te_TeO2_2():
 	# layers
 	layer_names = ['$Al_2O_3$', '$Cr_2O_3$', '$(Bi_{0.2}Sb_{0.8})_2Te_3$', 'Te/$TeO_2$']
 
