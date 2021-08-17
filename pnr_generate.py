@@ -186,7 +186,7 @@ def Al2O3_Bi2Se3_EuS_aAl2O3():
 	b_main1 = bc.Bi*2+bc.Se*3
 	dens_main1 = np.array([[rho[1]/u/M[1]]])
 	ddens_main1 = 0.2*dens_main1
-	v_main1 = np.array([[100., 7., 0], [20., 5., 2.]])
+	v_main1 = np.array([[100., 7., 0], [15., 5., 1.5]])
 	dv_main1 = np.array([[20., 7., 0], [10., 5., 1.]])
 	
 	# main2
@@ -245,14 +245,14 @@ def Al2O3_Cr2O3_BiSb2Te3_Te_TeO2():
 	b_main1 = bc.Cr*2+bc.O*3
 	dens_main1 = np.array([[rho[1]/u/M[1]]])
 	ddens_main1 = 0.2*dens_main1
-	v_main1 = np.array([[200., 10., 0], [20., 5., 0.6]])
+	v_main1 = np.array([[200., 10., 0], [12., 5., 0.6]])
 	dv_main1 = np.array([[20., 8., 0], [10., 5., 0.4]])
 	
 	# main2 (2 layers)
 	b_main2 = bc.Bi*0.4+bc.Sb*1.6+bc.Te*3
 	dens_main2 = np.array([[rho[3]/u/M[3]]])
 	ddens_main2 = 0.3*dens_main2
-	v_main2 = np.array([[20., 5., 0.6], [180., 20., 0.]])
+	v_main2 = np.array([[12., 5., 0.6], [180., 20., 0.]])
 	dv_main2 = np.array([[10., 5., 0.4], [20., 10., 0.]])
 
 	# cap

@@ -156,7 +156,7 @@ def add_noise(exp_name, q, x, x_orig, seed):
     x_noise = x_std*np.random.standard_normal(size=x_std.shape)
 
     # add noise to simulated data
-    x = x*(1 + x_noise)
+    x = x*(1. + x_noise)
 
     # interpolate to simulated q-values
     x = interp1d(q_exp, x, fill_value='extrapolate', axis=1)(q/10.)
@@ -523,7 +523,7 @@ def plot_decoded_exp(image_dir, x_pred, exp_names, q, x_moms):
         format_axis(ax, 'Q (nm$^{-1}$)', 'Reflectivity', prop, '', [q.min(), q.max()])
 
 
-        # zoom inset 1
+        # zoom inset
         fig_, ax_ = plt.subplots(1,1, figsize=(5.5/1.5,5/2.))
 
         for i in range(x_pred.shape[0]):
@@ -550,36 +550,7 @@ def plot_decoded_exp(image_dir, x_pred, exp_names, q, x_moms):
 
         fig_.tight_layout()
         fig_.subplots_adjust(wspace=0.1)
-        fig_.savefig(image_dir + '/decoded_exp_inset1.pdf')
-
-        # zoom inset 2
-        fig_, ax_ = plt.subplots(1,1, figsize=(5.5/1.5,5/2.))
-
-        for i in range(x_pred.shape[0]):
-            xdata_uu = 'experiments/' + exp_names[i] + '/x_uu.dat'
-            xdata_dd = 'experiments/' + exp_names[i] + '/x_dd.dat'
-            df_uu = read_exp(xdata_uu)
-            df_dd = read_exp(xdata_dd)
-            
-            p1, = ax_.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,0], x_moms), color='#316986')
-            p2, = ax_.plot(q, 10**i*normalize_log_inverse(x_pred[i,:,1], x_moms), color='#C86646')
-            
-
-            ax_.errorbar(10*df_uu['Q'].values, 10**i*df_uu['R'].values, yerr=df_uu['dR'].values, lw=0, elinewidth=1,
-                         color='#316986')
-            s1 = ax_.scatter(10*df_uu['Q'].values, 10**i*df_uu['R'].values, s=24, color='#316986',
-                             ec='none', label='R$^{++}$')
-            ax_.errorbar(10*df_dd['Q'].values, 10**i*df_dd['R'].values, yerr=df_dd['dR'].values, lw=0, elinewidth=1,
-                         color='#C86646')
-            s2 = ax_.scatter(10*df_dd['Q'].values, 10**i*df_dd['R'].values, s=24, color='#C86646',
-                             ec='none', label='R$^{--}$')
-
-        ax_.set_yscale('log')
-        format_axis(ax_, 'Q (nm$^{-1}$)', 'Refl.', prop, '', [0.6, 1.], [1e-5, 2e-4])
-
-        fig_.tight_layout()
-        fig_.subplots_adjust(wspace=0.1)
-        fig_.savefig(image_dir + '/decoded_exp_inset2.pdf')
+        fig_.savefig(image_dir + '/decoded_exp_inset.pdf')
 
     fig.tight_layout()
     fig.subplots_adjust(wspace=0.1)
@@ -668,13 +639,14 @@ def plot_predicted_property(image_dir, y_pred, y_true, y_err, y_name, y_header, 
     ax2.plot(py, yy, color='black')
 
     # plot quartiles
-    qs = (0.25, 0.5, 0.75, 0.95)
+    qs = (0.5, 0.75, 0.95)
     quartiles = np.quantile(y_err[:,k], qs)
     for i, q in enumerate(quartiles):
         ax2.axhline(q, linestyle='--', color='gray')
-        if i > 0:
-            ax2.text(4, q, '{:.2f}'.format(qs[i]), color='gray', fontproperties=tprop, ha='left', va='center',
-                     bbox=dict(facecolor='white', edgecolor='white', pad=0.05))
+        if i > 0: p = 0.75*py.max()
+        else: p = 0.05*py.max()
+        ax2.text(p, q, '{:.2f}'.format(qs[i]), color='gray', fontproperties=tprop, ha='left', va='center',
+                 bbox=dict(facecolor='white', edgecolor='white', pad=0.05))
 
     format_axis(ax2, 'pdf', '', prop, nbins=3)
     ax2.set_ylim([y_min, y_max])
@@ -919,7 +891,7 @@ def plot_class_exp_statistics(image_dir, df_exp, reps):
     fig.savefig(image_dir + '/class_distribution_exp.pdf')
 
 
-def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_units, y_th=None):
+def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_units, y_th=None, y_lims=None):
     # plot statistics of parameter in given column of latent representation z
     column = y_header.index(y_name)
     df_exp['temperature'] = df_exp['set'].map(lambda x: int(x[:-1]))
@@ -936,15 +908,14 @@ def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_u
         for entry in df_exp.itertuples():
             if entry.p_class > 0:
                 df_exp.loc[df_exp['set'] == entry.set, 'major_class'] += 1
-        df_exp['major_class'] = df_exp['major_class']/(reps + 1)
-        df_exp['major_class'] = (df_exp['major_class'] > 0.5).astype(int)
+        df_exp['major_class'] = df_exp['major_class']/reps
+        df_exp['major_class'] = (df_exp['major_class'] >= 0.5).astype(int)
         df_exp['palette'] = df_exp['major_class'].map(lambda x: cmap_disc_light(x))
 
     else:
         df_exp['palette'] = '#6A96A9'
 
-    #fig, ax = plt.subplots(figsize=(7.8,3.2))
-    fig, ax = plt.subplots(figsize=(6.5,3.2))
+    fig, ax = plt.subplots(figsize=(0.75 + 5.25/6.*len(np.unique(df_exp['temperature'])), 3.2))
     prop.set_size(14)
 
     sns.violinplot(ax=ax, x='temperature', y='p', width=0.6, scale='count', data=df_exp,
@@ -960,6 +931,8 @@ def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_u
     else:
         sns.swarmplot(ax=ax, x='temperature', y='p', data=df_exp, color='#316986', edgecolor='black', linewidth=1)
 
-    format_axis(ax, 'Temperature (K)', y_labels[column] + ' ' + y_units[column], prop)
+    ylims = ax.get_ylim()
+    y_lims = [min(ylims[0], y_lims[0]), max(ylims[1], y_lims[1])]
+    format_axis(ax, 'Temperature (K)', y_labels[column] + ' ' + y_units[column], prop, ylims=y_lims)
     fig.tight_layout()
     fig.savefig(image_dir + '/' + y_header[column] + '_distribution_exp.pdf')
