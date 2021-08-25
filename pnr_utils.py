@@ -10,7 +10,7 @@ from scipy.stats import gaussian_kde
 from sklearn.decomposition import PCA
 from sklearn.manifold import MDS
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import precision_recall_fscore_support, roc_curve, auc
+from sklearn.metrics import precision_recall_fscore_support, roc_curve, auc, confusion_matrix
 
 from plot_imports import *
 from pnr_models import *
@@ -190,9 +190,9 @@ def normalize_log_inverse(z, x_moms):
 
 
 def split_data(x_data, y_data, seed):
-    x_train, x_dev, y_train, y_dev = train_test_split(x_data, y_data, test_size=0.33, random_state=seed,
+    x_train, x_dev, y_train, y_dev = train_test_split(x_data, y_data, test_size=0.3, random_state=seed,
                                                       stratify=y_data[:,-1])
-    x_valid, x_test, y_valid, y_test = train_test_split(x_dev, y_dev, test_size=0.5, random_state=seed,
+    x_valid, x_test, y_valid, y_test = train_test_split(x_dev, y_dev, test_size=2./3., random_state=seed,
                                                         stratify=y_dev[:,-1])
     print('train size:', x_train.shape[0], 'positive examples:', np.count_nonzero(y_train[:,-1]),
           'negative examples:', len(y_train[:,-1]) - np.count_nonzero(y_train[:,-1]))
@@ -245,7 +245,18 @@ def get_predictions(model, data_loaders, d_sets, device, height, width, num_feat
         if not z_std_norm: z_mse = np.zeros((len(data_loaders[d_set].dataset), num_features))
         else: z_mse = None
 
-        if model_name == 'rvae':
+        if model_name == 'rcvae':
+            y_pred = np.zeros((len(data_loaders[d_set].dataset), num_features + 1))
+            y_err = np.zeros((len(data_loaders[d_set].dataset), num_features))
+
+            # predict
+            predict(model, data_loaders[d_set], device, y_ids, x_pred, z, x_mse, y_pred, y_err=y_err, z_mse=z_mse)
+
+            # invert standardization
+            y_pred[:,:-1] = scaler.inverse_transform(y_pred[:,:-1])
+            y_err = scaler.inverse_transform(y_err) - scaler.mean_
+
+        elif model_name == 'rvae':
             y_pred = np.zeros((len(data_loaders[d_set].dataset), num_features))
             y_err = np.zeros((len(data_loaders[d_set].dataset), num_features))
 
@@ -321,7 +332,12 @@ def get_predictions_exp(model, x_exp, exp_names, device, height, width, num_feat
     z_exp = np.zeros((x_exp.shape[0], kwargs['latent_dim']))
     x_exp_mse = np.zeros((x_exp.shape[0],))
     
-    if model_name == 'rvae':
+    if model_name == 'rcvae':
+        y_exp_pred = np.zeros((x_exp.shape[0], num_features + 1))
+        predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_exp_mse, y_exp_pred)
+        y_exp_pred[:,:-1] = scaler.inverse_transform(y_exp_pred[:,:-1])
+
+    elif model_name == 'rvae':
         y_exp_pred = np.zeros((x_exp.shape[0], num_features))
         predict_exp(model, x_exp, device, x_exp_pred, z_exp, x_exp_mse, y_exp_pred)
         y_exp_pred = scaler.inverse_transform(y_exp_pred)
@@ -349,7 +365,7 @@ def get_predictions_exp(model, x_exp, exp_names, device, height, width, num_feat
 #################################################################################################################
 
 def format_metric_name(x):
-    x = x.replace('_', ' ').replace('recon', 'reconstruction').replace('kld', 'KLD').replace('mse', 'MSE')
+    x = x.replace('_', ' ').capitalize().replace('Recon', 'Reconstruction').replace('Kld', 'KLD').replace('mse', 'MSE')
     return x
 
 def plot_history(image_dir, dynamics, logscale=False):
@@ -361,21 +377,20 @@ def plot_history(image_dir, dynamics, logscale=False):
     epochs = [d['epoch'] for d in dynamics]
     for i, metric in enumerate(metrics):
         fig, ax = plt.subplots(figsize=(5.5,5))
-        ax.plot(epochs, [d['train'][metric] for d in dynamics], color='#316986', label='training')
-        ax.plot(epochs, [d['valid'][metric] for d in dynamics], color='#C86646', label='validation')
+        ax.plot(epochs, [d['train'][metric] for d in dynamics], color='#316986', label='Train')
+        ax.plot(epochs, [d['valid'][metric] for d in dynamics], color='#C86646', label='Valid.')
 
-        ax.legend(prop=lprop, frameon=False)
+        ax.legend(prop=lprop, frameon=False, loc='best')
         if logscale:
             ax.set_yscale('log')
         else:
             d_min = min([d['train'][metric] for d in dynamics])
             d_max = max([d['train'][metric] for d in dynamics])
-            if (d_min < 1e-1) or (d_max >= 1e2):
-                ax.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
-                ax.yaxis.offsetText.set_fontproperties(prop)
+            ax.locator_params(axis='y', nbins=5)
+            ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+            ax.yaxis.offsetText.set_fontproperties(prop)
 
         format_axis(ax, 'epoch', format_metric_name(metric), prop)
-        fig.tight_layout()
         fig.savefig(image_dir + '/' + metric + '.pdf')
 
 
@@ -400,7 +415,6 @@ def plot_history_statistics(image_dir, dynamics_list, logscale=False):
     
     for i, metric in enumerate(metrics):
         fig, ax = plt.subplots(figsize=(5.5,5))
-
         train_avg = np.array([d['train'][metric].mean() for d in dynamics_stat])
         valid_avg = np.array([d['valid'][metric].mean() for d in dynamics_stat])
         train_std = np.array([d['train'][metric].std() for d in dynamics_stat])
@@ -408,19 +422,18 @@ def plot_history_statistics(image_dir, dynamics_list, logscale=False):
 
         ax.fill_between(epochs, train_avg - train_std, train_avg + train_std, color='#316986', alpha=0.3, lw=0)
         ax.fill_between(epochs, valid_avg - valid_std, valid_avg + valid_std, color='#C86646', alpha=0.3, lw=0)
-        ax.plot(epochs, train_avg, color='#316986', label='training')
-        ax.plot(epochs, valid_avg, color='#C86646', label='validation')
+        ax.plot(epochs, train_avg, color='#316986', label='Train')
+        ax.plot(epochs, valid_avg, color='#C86646', label='Valid.')
 
         ax.legend(prop=lprop, frameon=False, loc='best')
         if logscale:
             ax.set_yscale('log')
         else:
-            if (train_avg.min() < 1e-1) or (train_avg.max() >= 1e2):
-                ax.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
-                ax.yaxis.offsetText.set_fontproperties(prop)
-
+            ax.locator_params(axis='y', nbins=5)
+            ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+            ax.yaxis.offsetText.set_fontproperties(prop)
+        
         format_axis(ax, 'epoch', format_metric_name(metric), prop)
-        fig.tight_layout()
         fig.savefig(image_dir + '/' + metric + '_stats.pdf')
 
 #################################################################################################################
@@ -558,74 +571,74 @@ def plot_decoded_exp(image_dir, x_pred, exp_names, q, x_moms):
 
 #################################################################################################################
 
-def plot_predicted(image_dir, y_pred, y_true, y_err, y_ids, y_labels, y_units, title=r'$L_1$'):
+def plot_predicted(image_dir, y_pred, y_true, y_ids, y_labels, y_units):
     prop.set_size(14)
     if len(y_ids) > 15: n = 5
     else: n = 3
     w = int((len(y_ids) + (len(y_ids)%n > 0)*(n - len(y_ids)%n))/n)
     fig = plt.figure(figsize=(3.3*w, n*2.67))
-    cmap_mse = truncate_colormap(mpl.cm.get_cmap('bone_r'), minval=0.2, maxval=0.8)
     
     for k in range(len(y_ids)-1):
         ax = fig.add_subplot(n, w, k+1)
-        norm = mpl.colors.Normalize(vmin=y_err[:,k].min(), vmax=y_err[:,k].max())
-
-        g = ax.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=y_err[:,k], s=10, cmap=cmap_mse, norm=norm)
+        
+        bins = 60
+        norm = mpl.colors.LogNorm(vmin=1, vmax=1e2)
+        
+        _, _, _, g = ax.hist2d(y_true[:,y_ids[k]], y_pred[:,k], bins=bins, cmap=cmap_mse, norm=norm, cmin=1, alpha=0.8,
+                               ec='none')
         cbar = fig.colorbar(g, ax=ax, aspect=12)
-        cbar.ax.set_title(title + ' ' + y_units[k], fontproperties=prop)
         cbar.ax.tick_params(direction='in', length=6, width=1)
+        cbar.ax.tick_params(which='minor', length=0)
         for lab in cbar.ax.get_yticklabels():
             lab.set_fontproperties(prop)
         cbar.outline.set_visible(False)
-        ax.clear()
-        ax.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=y_err[:,k], s=10, alpha=0.1, cmap=cmap_mse, norm=norm)
         
-        ax.text(0.075, 0.9, y_labels[k], ha='left', va='center', transform=ax.transAxes, fontproperties=prop)
-        
-        format_axis(ax, '', '', prop)
+        format_axis(ax, y_labels[k] + ' ' + y_units[k], y_labels[k] + ' ' + y_units[k], prop)
         ax.locator_params(tight=True, nbins=4)
         ax.set_aspect('equal')
         
-        x_min = min(y_true[:,y_ids[k]].min(), y_pred[:,k].min()) - 0.2
-        x_max = max(y_true[:,y_ids[k]].max(), y_pred[:,k].max()) + 0.2
+        x_min = y_true[:,y_ids[k]].min() - 0.05
+        x_max = y_true[:,y_ids[k]].max() + 0.05
         ax.set_xlim([x_min, x_max])
         ax.set_ylim([x_min, x_max])
         ax.plot([x_min, x_max], [x_min, x_max], color='black', linestyle='--')
-            
+        
     fig.tight_layout()
-    fig.subplots_adjust(wspace=0.2, hspace=0.3)
+    fig.subplots_adjust(wspace=0.4, hspace=0.3)
     fig.savefig(image_dir + '/predicted.png', dpi=400)
 
 
-def plot_predicted_property(image_dir, y_pred, y_true, y_err, y_name, y_header, y_ids, y_labels, y_units, title=r'$L_1$'):
+def plot_predicted_property(image_dir, y_pred, y_true, y_err, y_name, y_header, y_ids, y_labels, y_units,
+                            qs=(0.5, 0.75, 0.95)):
     prop.set_size(14)
     tprop = prop.copy()
     tprop.set_size(12)
     fig, (ax1, ax2) = plt.subplots(1,2, figsize=(1.2*4.8, 1.2*2.67), gridspec_kw=dict(width_ratios=[2,1]))
     
     k = y_header.index(y_name)
-    cmap_mse = truncate_colormap(mpl.cm.get_cmap('bone_r'), minval=0.1, maxval=0.8) 
-    norm = mpl.colors.Normalize(vmin=y_err[:,k].min(), vmax=y_err[:,k].max())
-
+    
     # predicted vs. true values
-    g = ax1.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=y_err[:,k], s=10, cmap=cmap_mse, norm=norm)
-    cbar = fig.colorbar(g, ax=ax1, aspect=12)
-    cbar.ax.set_title(title + ' ' + y_units[k], fontproperties=prop)
+    bins = 60
+    norm = mpl.colors.LogNorm(vmin=1, vmax=1e2)
+    
+    _, _, _, g = ax1.hist2d(y_true[:,y_ids[k]], y_pred[:,k], bins=bins, cmap=cmap_mse, norm=norm, cmin=1, alpha=0.8,
+                           ec='none')
+
+    ax_ = inset_axes(ax1, width='100%', height='8%', loc='upper center', borderpad=-2)
+    cbar = fig.colorbar(g, cax=ax_, orientation='horizontal')
     cbar.ax.tick_params(direction='in', length=6, width=1)
-    for lab in cbar.ax.get_yticklabels():
+    cbar.ax.tick_params(which='minor', length=0)
+    cbar.ax.xaxis.set_ticks_position('top')
+    for lab in cbar.ax.get_xticklabels():
         lab.set_fontproperties(prop)
     cbar.outline.set_visible(False)
-    ax1.clear()
-    ax1.scatter(y_true[:,y_ids[k]], y_pred[:,k], c=y_err[:,k], s=10, alpha=0.1, cmap=cmap_mse, norm=norm)
-    
-    #ax1.text(0.075, 0.9, y_labels[k], ha='left', va='center', transform=ax1.transAxes, fontproperties=prop)
-    
-    format_axis(ax1, 'true ' + y_labels[k], 'pred. ' + y_labels[k], prop)
-    ax1.locator_params(tight=True, nbins=6)
+        
+    format_axis(ax1, 'True ' + y_labels[k] + ' ' + y_units[k], 'Pred. ' + y_labels[k] + ' ' + y_units[k], prop)
+    ax1.locator_params(tight=True, nbins=4)
     ax1.set_aspect('equal')
     
-    x_min = min(y_true[:,y_ids[k]].min(), y_pred[:,k].min()) - 0.2
-    x_max = max(y_true[:,y_ids[k]].max(), y_pred[:,k].max()) + 0.2
+    x_min = y_true[:,y_ids[k]].min() - 0.05
+    x_max = y_true[:,y_ids[k]].max() + 0.05
     ax1.set_xlim([x_min, x_max])
     ax1.set_ylim([x_min, x_max])
     ax1.plot([x_min, x_max], [x_min, x_max], color='black', linestyle='--')
@@ -639,22 +652,22 @@ def plot_predicted_property(image_dir, y_pred, y_true, y_err, y_name, y_header, 
     ax2.plot(py, yy, color='black')
 
     # plot quartiles
-    qs = (0.5, 0.75, 0.95)
+    if len(qs) < 4: i0 = 0
+    else: i0 = 2
     quartiles = np.quantile(y_err[:,k], qs)
     for i, q in enumerate(quartiles):
         ax2.axhline(q, linestyle='--', color='gray')
-        if i > 0: p = 0.75*py.max()
+        if i > i0: p = 0.72*py.max()
         else: p = 0.05*py.max()
         ax2.text(p, q, '{:.2f}'.format(qs[i]), color='gray', fontproperties=tprop, ha='left', va='center',
                  bbox=dict(facecolor='white', edgecolor='white', pad=0.05))
 
-    format_axis(ax2, 'pdf', '', prop, nbins=3)
+    format_axis(ax2, 'pdf', r'$L_1$ ' + y_units[k], prop, nbins=3)
     ax2.set_ylim([y_min, y_max])
-    ax2.set_yticklabels([])
 
-    fig.tight_layout()
-    fig.subplots_adjust(wspace=0.15)
+    fig.subplots_adjust(wspace=0.35, top=0.8, bottom=0.15)
     fig.savefig(image_dir + '/predicted_' + y_name + '.png', dpi=400)
+
 
 def get_roc(df, d_sets):
     fpr = []; tpr = []; roc_auc = []; th = []
@@ -668,6 +681,14 @@ def get_roc(df, d_sets):
     return fpr, tpr, roc_auc, th
 
 
+def get_roc_prox(df, y_header, column):
+    y_true = np.stack(df.loc[df['set']=='valid', 'y_true'].values)[:,-1]
+    y_pred = np.stack(df.loc[df['set']=='valid', 'y_pred'].values)[:,y_header.index(column)]
+
+    fpr, tpr, th = roc_curve(y_true, y_pred)
+    return fpr, tpr, th
+
+
 def get_optimal_threshold(fpr, tpr, th):
     k = np.argmin(np.abs(tpr - (1 - fpr)))
     print('tpr:', tpr[k], 'fpr:', fpr[k], 'threshold:', th[k])
@@ -677,16 +698,18 @@ def get_optimal_threshold(fpr, tpr, th):
 def get_precision_recall_f1(df, d_set, th=0.5):
     y_true = np.stack(df.loc[df['set']==d_set, 'y_true'].values)[:,-1]
     y_pred = np.stack(df.loc[df['set']==d_set, 'y_pred'].values)[:,-1]
-    y_pred = (y_pred > th).astype(int)
+    y_pred = (y_pred >= th).astype(int)
     precision, recall, f1, _ = precision_recall_fscore_support(y_true, y_pred, average=None, labels=[0,1])
     return precision, recall, f1
 
 
 def plot_roc(image_dir, fpr, tpr, roc_auc, op=None):
     prop.set_size(18)
-    fig, ax = plt.subplots(figsize=(6,5.5))
+    tprop = prop.copy()
+    tprop.set_size(16)
+    fig, ax = plt.subplots(figsize=(5.5,5))
 
-    if op: ax.scatter(op[1], op[0], s=32, facecolor='white', edgecolor='black',
+    if op: ax.scatter(op[1], op[0], s=48, facecolor='white', edgecolor='black',
                       lw=1.5, zorder=10, label=r'$t_{cutoff}$:' + ' %0.2f' % op[2])
 
     for i, (key, color) in enumerate(set_colors.items()):
@@ -694,7 +717,7 @@ def plot_roc(image_dir, fpr, tpr, roc_auc, op=None):
         ax.plot([0, 1], [0, 1], color='black', lw=1, linestyle='--')
 
     format_axis(ax, 'false positive rate', 'true positive rate', prop, xlims=[0,1], ylims=[0,1.05])
-    ax.legend(frameon=False, loc='lower right', prop=prop)
+    ax.legend(frameon=False, loc='lower right', prop=tprop)
 
     fig.tight_layout()
     fig.savefig(image_dir + '/roc.pdf')
@@ -710,7 +733,7 @@ def plot_precision_recall_f1(image_dir, df, d_sets, th=0.5):
     scores_dict = {'precision': 0, 'recall': 1, 'f1': 2}
 
     for d_set in d_sets:
-        fig, ax = plt.subplots(figsize=(5,3.5))
+        fig, ax = plt.subplots(figsize=(5,3.2))
 
         scores = get_precision_recall_f1(df, d_set, th)
         y0 = [scores[scores_dict[score]][0] for score in ['recall', 'precision', 'f1']]
@@ -731,6 +754,57 @@ def plot_precision_recall_f1(image_dir, df, d_sets, th=0.5):
 
         fig.tight_layout()
         fig.savefig(image_dir + '/scores_' + d_set + '.pdf', dpi='figure')
+
+
+def get_confusion_matrix(y_true, y_pred):
+    cm = confusion_matrix(y_true, y_pred, labels=[0,1])
+    cm = cm.astype('float')/cm.sum(axis=1)[:, np.newaxis]
+    return np.round(cm, 2)
+
+
+def plot_confusion_matrix(image_dir, df, y_header, y_name, y_th):
+    norm = mpl.colors.Normalize(vmin=0, vmax=1)
+    cm = get_confusion_matrix(np.stack(df.loc[df['set']=='test', 'y_true'])[:,-1].astype(int),
+                             (np.stack(df.loc[df['set']=='test', 'y_pred'])[:,y_header.index(y_name)]>=y_th).astype(int))
+
+    # confusion matrix plot
+    fig, ax = plt.subplots(figsize=(2.3,2.3))
+    prop.set_size(14)
+    squares = [mpatch.Rectangle((-1,0), 1, 1, color=cmap_cm(norm(cm[0,0]))),
+               mpatch.Rectangle((0,0), 1, 1, color=cmap_cm(norm(cm[0,1]))),
+               mpatch.Rectangle((-1,-1), 1, 1, color=cmap_cm(norm(cm[1,0]))),
+               mpatch.Rectangle((0,-1), 1, 1, color=cmap_cm(norm(cm[1,1])))]
+
+    for (square, value) in zip(squares, cm.ravel()):
+        ax.add_artist(square)
+        rx, ry = square.get_xy()
+        cx = rx + square.get_width()/2.0
+        cy = ry + square.get_height()/2.0
+
+        if value >= 0.7: color = 'white'
+        else: color='black'
+        ax.annotate('{:.2f}'.format(value), (cx, cy), color=color, fontproperties=prop, ha='center', va='center')
+
+    format_axis(ax, 'Pred.', 'True', prop)
+    ax.set_xlim(-1,1)
+    ax.set_ylim(-1,1)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    fig.tight_layout()
+    fig.savefig(image_dir + '/confusion_matrix_' + y_name + '.pdf', bbox_inches='tight')
+    
+    # save colorbar
+    sm = mpl.cm.ScalarMappable(cmap=cmap_cm, norm=norm)
+    sm.set_array([])
+
+    fig, ax = plt.subplots(figsize=(0.21,2.5))
+    cbar = fig.colorbar(sm, cax=ax, ticks=[0, 0.5, 1])
+    format_axis(cbar.ax, '', '', prop)
+    cbar.ax.tick_params(which='major', length=0, width=0)
+    for lab in cbar.ax.get_yticklabels():
+        lab.set_fontproperties(prop)
+    cbar.outline.set_visible(False)
+    fig.savefig(image_dir + '/confusion_matrix_' + y_name + '_cbar.pdf', bbox_inches='tight')
 
 #################################################################################################################     
 
@@ -866,28 +940,37 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
 def plot_class_exp_statistics(image_dir, df_exp, reps):
     # plot statistics of proximity class
     df_exp['temperature'] = df_exp['set'].map(lambda x: int(x[:-1]))
+    num_temps = len(np.unique(df_exp['temperature']))
+
     df_exp['class_pred'] = df_exp['y_pred'].map(lambda x: x[-1])
     df_exp['class_dist'] = df_exp['class_pred'] - df_exp['th']
     df_exp['class_prox'] = (df_exp['class_dist'] > 0).astype(int)
     df_exp['major_class'] = 0
+    
     for entry in df_exp.itertuples():
         if entry.class_prox > 0:
             df_exp.loc[df_exp['set'] == entry.set, 'major_class'] += 1
-    df_exp['major_class'] = df_exp['major_class']/(reps + 1)
-    df_exp['major_class'] = (df_exp['major_class'] > 0.5).astype(int)
+    df_exp['major_class'] = df_exp['major_class']/reps
+    df_exp['major_class'] = (df_exp['major_class'] >= 0.5).astype(int)
     df_exp['palette'] = df_exp['major_class'].map(lambda x: cmap_disc_light(x))
 
-    fig, ax = plt.subplots(figsize=(7.8,3.2))
+    fig, ax = plt.subplots(figsize=(0.25 + num_temps, 3.2))
     prop.set_size(14)
 
     sns.violinplot(ax=ax, x='temperature', y='class_dist', width=0.6, scale='count', data=df_exp,
                    inner=None, saturation=0.9, palette=df_exp['palette'].tolist(), linewidth=0)
-    g = sns.swarmplot(ax=ax, x='temperature', y='class_dist', hue='class_prox', data=df_exp,
+    g = sns.stripplot(ax=ax, x='temperature', y='class_dist', hue='class_prox', data=df_exp, jitter=0.05,
                       palette={0: cmap_disc(0), 1: cmap_disc(1)}, edgecolor='black', linewidth=1)
     g.legend_.remove()
     ax.axhline(0, linestyle='--', color='#ADABA4')
-    format_axis(ax, 'Temperature (K)', r'$class_{pred} - t_{cutoff}$', prop)
-    fig.tight_layout()
+    
+    if num_temps > 1:
+        format_axis(ax, 'Temperature (K)', r'$class_{pred} - t_{cutoff}$', prop)
+    else:
+        T = np.unique(df_exp['temperature'])[0]
+        format_axis(ax, 'T (K)', r'$class_{pred} - t_{cutoff}$', prop)
+
+    fig.subplots_adjust(bottom=0.2)
     fig.savefig(image_dir + '/class_distribution_exp.pdf')
 
 
@@ -915,7 +998,8 @@ def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_u
     else:
         df_exp['palette'] = '#6A96A9'
 
-    fig, ax = plt.subplots(figsize=(0.75 + 5.25/6.*len(np.unique(df_exp['temperature'])), 3.2))
+    num_temps = len(np.unique(df_exp['temperature']))
+    fig, ax = plt.subplots(figsize=(0.75 + 5.25/6.*num_temps, 3.2))
     prop.set_size(14)
 
     sns.violinplot(ax=ax, x='temperature', y='p', width=0.6, scale='count', data=df_exp,
@@ -924,8 +1008,6 @@ def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_u
     if y_th != None:
         g = sns.stripplot(ax=ax, x='temperature', y='p', hue='p_class', data=df_exp, jitter=0.05,
                           palette={0: cmap_disc(0), 1: cmap_disc(1)}, edgecolor='black', linewidth=1)
-        #g = sns.swarmplot(ax=ax, x='temperature', y='p', hue='p_class', data=df_exp, jitter=0.05,
-        #                  palette={0: cmap_disc(0), 1: cmap_disc(1)}, edgecolor='black', linewidth=1)
         g.legend_.remove()
         ax.axhline(y_th, linestyle='--', color='#ADABA4')
     else:
@@ -933,6 +1015,13 @@ def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_u
 
     ylims = ax.get_ylim()
     y_lims = [min(ylims[0], y_lims[0]), max(ylims[1], y_lims[1])]
-    format_axis(ax, 'Temperature (K)', y_labels[column] + ' ' + y_units[column], prop, ylims=y_lims)
-    fig.tight_layout()
+    if num_temps > 1:
+        format_axis(ax, 'Temperature (K)', y_labels[column] + ' ' + y_units[column], prop, ylims=y_lims)
+        fig.subplots_adjust(bottom=0.2)
+
+    else:
+        T = np.unique(df_exp['temperature'])[0]
+        format_axis(ax, 'T (K)', y_labels[column] + ' ' + y_units[column], prop, ylims=y_lims)
+        fig.subplots_adjust(bottom=0.2, left=0.45)
+
     fig.savefig(image_dir + '/' + y_header[column] + '_distribution_exp.pdf')

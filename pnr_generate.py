@@ -119,8 +119,8 @@ def read_exp(file_name):
 ################################################### constants ###################################################
 
 # name of experiment sample, name of function to build sample stack, maximum q (A^-1), neutron wavelength (A)
-#sample_name, structure, q_max, wavelen = 'BiSe10_EuS5', 'Al2O3_Bi2Se3_EuS_aAl2O3', 0.13, 4.75
-sample_name, structure, q_max, wavelen = 'CrO20_BiSbTe20', 'Al2O3_Cr2O3_BiSb2Te3_Te_TeO2', 0.172, 5.35
+sample_name, structure, q_max, wavelen = 'BiSe10_EuS5', 'Al2O3_Bi2Se3_EuS_aAl2O3', 0.13, 4.75
+#sample_name, structure, q_max, wavelen = 'CrO20_BiSbTe20', 'Al2O3_Cr2O3_BiSb2Te3_Te_TeO2', 0.172, 5.35
 
 N = 256                                                 # number of q points for reflectivity plot
 q_min = 0.01
@@ -129,8 +129,8 @@ q = np.linspace(q_min, q_max, N)                        # q points at which to s
 res = 0.5*(0.001 + 0.0001)								# instrument resolution
 dres = 0.5*(0.001 - 0.0001)								# uncertainty in instrument resolution
 
-log_bkg = -7											# instrument background (log10)
-dlog_bkg = 3											# uncertainty in instrument background (log10)
+log_bkg = -6											# instrument background (log10)
+dlog_bkg = 2											# uncertainty in instrument background (log10)
 
 num_samples = 100000                                    # number of examples to generate
 u = 1.66054                                             # conversion constant for density calculation
@@ -186,7 +186,7 @@ def Al2O3_Bi2Se3_EuS_aAl2O3():
 	b_main1 = bc.Bi*2+bc.Se*3
 	dens_main1 = np.array([[rho[1]/u/M[1]]])
 	ddens_main1 = 0.2*dens_main1
-	v_main1 = np.array([[100., 7., 0], [15., 5., 1.5]])
+	v_main1 = np.array([[100., 7., 0], [16., 5., 1.6]])
 	dv_main1 = np.array([[20., 7., 0], [10., 5., 1.]])
 	
 	# main2

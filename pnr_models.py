@@ -264,10 +264,79 @@ class RVAE(VAE):
         else:
             return [self.decode(z_mean), y], z_mean, z_log_var
 
+
+class RCVAE(CVAE):
+    def __init__(self, height, width, num_features, prox_features, scaler, hidden_dim, latent_dim, start_filters,
+                 kernel_size, pool_size, num_conv, num_dense, slope, drop, beta_1, beta_2):
+        super(RCVAE, self).__init__(height, width, hidden_dim, latent_dim, start_filters, kernel_size, pool_size,
+                                    num_conv, num_dense, slope, drop, beta_1, beta_2)
+        
+        # definitions
+        self.num_features = num_features
+        self.prox_features = prox_features
+        self.scaler = scaler
+
+        # build regressors
+        for i in range(num_features):
+            p = nn.Linear(in_features=latent_dim, out_features=1, bias=False)
+            setattr(self, "reg_%d"%i, p)
+        
+        if self.scaler != None:
+            self.pos = nn.ReLU()
+
+
+        # build classifier
+        self.classifier = nn.Sequential(
+                            nn.Linear(in_features=len(prox_features), out_features=1, bias=False),
+                            nn.Sigmoid()
+                        )
+
+    def label_loss(self, y_pred, y_true):
+        return torch.sum(F.mse_loss(y_pred, y_true, reduction='none'), dim=-1)
+
+    def loss_function(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
+        recon_loss = self.recon_loss(d_pred[0], d_true[0])
+        kld_loss = self.kld_loss(z_mean, z_log_var, z_true)
+        class_loss = self.class_loss(d_pred[1][:,[-1]], d_true[1][:,[-1]])
+        label_loss = self.label_loss(d_pred[1][:,:-1], d_true[1][:,:-1])
+        return torch.mean(recon_loss + self.b1*kld_loss + self.b2*(class_loss + label_loss))
+    
+    def metrics(self, d_pred, d_true, z_mean, z_log_var, z_true=0):
+        total_loss = self.loss_function(d_pred, d_true, z_mean, z_log_var, z_true)
+        recon_loss = self.recon_loss(d_pred[0], d_true[0])
+        kld_loss = torch.mean(self.kld_loss(z_mean, z_log_var, z_true))
+        class_loss = torch.mean(self.class_loss(d_pred[1][:,[-1]], d_true[1][:,[-1]]))
+        label_loss = torch.mean(self.label_loss(d_pred[1][:,:-1], d_true[1][:,:-1]))
+        recon_mse = F.mse_loss(d_pred[0], d_true[0])
+        class_accuracy = ((d_pred[1][:,[-1]] > 0.5).float() == d_true[1][:,[-1]]).float().mean()
+        label_mse = F.mse_loss(d_pred[1][:,:-1], d_true[1][:,:-1])
+        return {'total_loss': total_loss, 'recon_loss': recon_loss, 'kld_loss': kld_loss, 'class_loss': class_loss,
+                'label_loss': label_loss, 'recon_mse': recon_mse, 'class_accuracy': class_accuracy, 'label_mse': label_mse}
+    
+    def forward(self, x):
+        z_mean, z_log_var = self.encode(x)
+        y = torch.cat([getattr(self, "reg_%d"%i)(z_mean) for i in range(self.num_features)], dim=1)
+        if self.scaler != None:
+            y = self.scaler.transform(self.pos(self.scaler.inverse_transform(y)))
+        
+        c = self.classifier(y[:,self.prox_features])
+        y = torch.cat([y, c], dim=1)
+
+        if self.training:
+            z = self.sampling(z_mean, z_log_var)
+            return [self.decode(z), y], z_mean, z_log_var
+        else:
+            return [self.decode(z_mean), y], z_mean, z_log_var
+
 #################################################################################################################
 
-def init_model(model_name, height, width, num_features, kwargs, device, scaler=None):
-    if model_name == 'rvae':
+def init_model(model_name, height, width, num_features, kwargs, device, prox_features=None, scaler=None):
+    if model_name == 'rcvae':
+        model = RCVAE(height, width, num_features, prox_features, scaler, **kwargs).to(device)
+        metric_keys = ['total_loss', 'recon_loss', 'kld_loss', 'class_loss', 'label_loss', 'recon_mse',
+                       'class_accuracy', 'label_mse']
+    
+    elif model_name == 'rvae':
         model = RVAE(height, width, num_features, scaler, **kwargs).to(device)
         metric_keys = ['total_loss', 'recon_loss', 'kld_loss', 'label_loss', 'recon_mse', 'label_mse']
     
@@ -387,7 +456,7 @@ def predict(model, data_loader, device, y_ids, x_set, z_set, x_mse, y_set=None, 
             try: len(y_err)
             except: pass
             else:
-                metric = F.l1_loss(d_pred[1], y_true[:,:-1], reduction='none')
+                metric = F.l1_loss(d_pred[1][:,:y_true.size()[1]-1], y_true[:,:-1], reduction='none')
                 y_err[i_start:i_start + len(x_true),:] = metric.cpu().numpy()
 
             # save z_mse
