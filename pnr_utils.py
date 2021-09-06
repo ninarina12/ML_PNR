@@ -438,7 +438,7 @@ def plot_history_statistics(image_dir, dynamics_list, logscale=False):
 
 #################################################################################################################
 
-def plot_decoded(image_dir, x_pred, x_true, x_mse, d_set):
+def plot_decoded(image_dir, x_pred, x_true, x_mse, d_set, x_exp_mse, exp_names):
     n = 6
     fig = plt.figure(figsize=(2*n,7))
     tprop = prop.copy()
@@ -470,6 +470,38 @@ def plot_decoded(image_dir, x_pred, x_true, x_mse, d_set):
     fig.tight_layout()
     fig.savefig(image_dir + '/decoded_' + d_set + '.pdf')
 
+    # plot quartile distribution
+    fig, ax = plt.subplots(figsize=(2.5,7))
+    prop.set_size(16)
+    y_min, y_max = x_mse.min(), x_mse.max()
+    n = 1000
+    yy = np.linspace(y_min, y_max, n)
+    kde = gaussian_kde(x_mse)
+    py = kde.pdf(yy)
+    ax.plot(py, yy, color='black')
+    qs = (0.25, 0.5, 0.75)
+    quartiles = np.quantile(x_mse, qs)
+    for i, q in enumerate(quartiles):
+        ax.axhline(q, linestyle='--', color='gray')
+        ax.text(1.1*py.max(), q, '{:.2f}'.format(qs[i]), color='gray', fontproperties=tprop, ha='left', va='center',
+                bbox=dict(facecolor='white', edgecolor='white', pad=0.05))
+
+    format_axis(ax, '', 'MSE', prop, nbins=3)
+    ax.set_ylim([y_min, y_max])
+    ax.ticklabel_format(axis='both', style='sci', scilimits=(-2,2))
+    ax.xaxis.offsetText.set_fontproperties(prop)
+    ax.yaxis.offsetText.set_fontproperties(prop)
+
+    temps = [int(i[i.index('/')+1:-1]) for i in exp_names]
+    if len(temps) > 1:
+        norm = mpl.colors.LogNorm(vmin=min(temps), vmax=max(temps))
+    else:
+        norm = mpl.colors.LogNorm(vmin=1, vmax=max(temps))
+    ax.scatter([0.05*py.max()]*len(x_exp_mse), x_exp_mse, c=cmap_temp(norm(temps)), s=48, ec='black')
+    ax.invert_yaxis()
+
+    fig.tight_layout()
+    fig.savefig(image_dir + '/decoded_' + d_set + '_quartile.pdf')
 
 def plot_decoded_exp(image_dir, x_pred, exp_names, q, x_moms):
     temps = [int(i[i.index('/')+1:-1]) for i in exp_names]
