@@ -59,7 +59,7 @@ def Al2O3_Bi2Se3_EuS_aAl2O3(y_pred, y_header):
 
 
 def Al2O3_Cr2O3_BiSb2Te3_Te_TeO2(y_pred, y_header):
-	layer_names = ['$Al_2O_3$', '$Cr_2O_3$', '$(Bi_{0.2}Sb_{0.8})_2Te_3$', 'Te/$TeO_2$']
+	layer_names = ['$Al_2O_3$', '$Cr_2O_3$', '$(Bi,Sb)_2Te_3$', 'Te/$TeO_2$']
 
 	# neutron scattering lengths
 	b_sub = bc.Al*2+bc.O*3
