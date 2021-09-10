@@ -886,8 +886,8 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
     else: n = 3
     w = int((len(y_ids) + (len(y_ids)%n > 0)*(n - len(y_ids)%n))/n)
     fig = plt.figure(figsize=(3*w, n*2.5))
+    
     if mode == 2:
-        fig_, ax_ = plt.subplots(figsize=(0.6*(len(y_ids) - 1),0.25*(len(y_ids) - 1)))
         D = np.zeros((len(y_ids) - 1, x_data.shape[1]))
 
     # downsampling
@@ -969,18 +969,35 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
         ax.locator_params(tight=True, nbins=4)
         ax.set_xticks([]); ax.set_yticks([])
 
-    ax_.imshow(D, cmap=cmap)
-    format_axis(ax_, '', '', prop)
-    ax_.set_xticks(list(range(len(y_ids[:-1])))); ax_.set_yticks(list(range(len(y_ids[:-1]))))
-    ax_.set_xticklabels(y_labels[:-1]); ax_.set_yticklabels(y_labels[:-1])
-
     fig.tight_layout()
     fig.subplots_adjust(wspace=0.15, hspace=0.2)
     fig.savefig(image_dir + '/' + tag + '_' + mode_dict[mode] + '.png', dpi=400)
 
-    plt.xticks(rotation=90)
-    fig_.tight_layout()
-    fig_.savefig(image_dir + '/' + tag + '_' + mode_dict[mode] + '_contribution.pdf', dpi=400)
+    if mode == 2:
+        # save colorbar
+        norm = mpl.colors.Normalize(vmin=0, vmax=1)
+        sm = mpl.cm.ScalarMappable(cmap=cmap_cm, norm=norm)
+        sm.set_array([])
+
+        fig, ax = plt.subplots(figsize=(0.21,0.25*(len(y_ids) - 1)))
+        cbar = fig.colorbar(sm, cax=ax, ticks=[0, 0.5, 1])
+        format_axis(cbar.ax, '', '', prop)
+        cbar.ax.tick_params(which='major', length=0, width=0)
+        for lab in cbar.ax.get_yticklabels():
+            lab.set_fontproperties(prop)
+        cbar.outline.set_visible(False)
+        fig.savefig(image_dir + '/' + tag + '_' + mode_dict[mode] + '_contribution_cbar.pdf', bbox_inches='tight')
+
+        # plot gradient contribution
+        fig, ax = plt.subplots(figsize=(0.6*(len(y_ids) - 1),0.25*(len(y_ids) - 1)))
+        ax.imshow(D, cmap=cmap_cm)
+        format_axis(ax, '', '', prop)
+        ax.set_xticks(list(range(len(y_ids[:-1])))); ax.set_yticks(list(range(len(y_ids[:-1]))))
+        ax.set_xticklabels(y_labels[:-1]); ax.set_yticklabels(y_labels[:-1])
+
+        plt.xticks(rotation=90)
+        fig.tight_layout()
+        fig.savefig(image_dir + '/' + tag + '_' + mode_dict[mode] + '_contribution.pdf', dpi=400)
 
 #################################################################################################################  
 
