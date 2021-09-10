@@ -886,6 +886,9 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
     else: n = 3
     w = int((len(y_ids) + (len(y_ids)%n > 0)*(n - len(y_ids)%n))/n)
     fig = plt.figure(figsize=(3*w, n*2.5))
+    if mode == 2:
+        fig_, ax_ = plt.subplots(figsize=(0.6*(len(y_ids) - 1),0.25*(len(y_ids) - 1)))
+        D = np.zeros((len(y_ids) - 1, x_data.shape[1]))
 
     # downsampling
     if mode < 3:
@@ -922,7 +925,10 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
 
         elif mode == 2:
             Dy = gradient_pt_cloud(xd, yd)
-            idx = np.argsort(Dy.mean(axis=0))[::-1]
+            dy = np.abs(Dy.mean(axis=0))
+            dy = (dy - dy.min())/(dy.max() - dy.min())
+            if 'class' not in y_labels[k]: D[k,:] = dy
+            idx = np.argsort(dy)[::-1]
             x_proj = np.concatenate([xd[:,[idx[0]]], xd[:,[idx[1]]]], axis=1)
         
         else:
@@ -963,9 +969,18 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
         ax.locator_params(tight=True, nbins=4)
         ax.set_xticks([]); ax.set_yticks([])
 
+    ax_.imshow(D, cmap=cmap)
+    format_axis(ax_, '', '', prop)
+    ax_.set_xticks(list(range(len(y_ids[:-1])))); ax_.set_yticks(list(range(len(y_ids[:-1]))))
+    ax_.set_xticklabels(y_labels[:-1]); ax_.set_yticklabels(y_labels[:-1])
+
     fig.tight_layout()
     fig.subplots_adjust(wspace=0.15, hspace=0.2)
     fig.savefig(image_dir + '/' + tag + '_' + mode_dict[mode] + '.png', dpi=400)
+
+    plt.xticks(rotation=90)
+    fig_.tight_layout()
+    fig_.savefig(image_dir + '/' + tag + '_' + mode_dict[mode] + '_contribution.pdf', dpi=400)
 
 #################################################################################################################  
 
