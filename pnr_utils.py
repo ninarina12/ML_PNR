@@ -61,18 +61,50 @@ def parse_labels(df, include_roughness=False):
     for old, new in zip(sym_old, sym_new):
         y_labels[:-1] = [l.replace(old, new) for l in y_labels[:-1]]
 
+    # GenX units
     y_units = ['(f.u./'+r'$nm^3$)']*len([l for l in y_header if l.startswith('dens_')]) + \
               ['(nm)']*len([l for l in y_header if l.startswith('d_')]) + \
               ['(nm)']*len([l for l in y_header if l.startswith('s_')]) + \
               [r'($\mu_B$'+'/f.u.)']*len([l for l in y_header if l.startswith('magn_')]) + ['']
 
-    return y_data, y_columns, y_header, y_ids, y_labels, y_units
+    # conventional units
+    y_units_ = ['(g/'+r'$cm^3$)']*len([l for l in y_header if l.startswith('dens_')]) + \
+               ['(nm)']*len([l for l in y_header if l.startswith('d_')]) + \
+               ['(nm)']*len([l for l in y_header if l.startswith('s_')]) + \
+               ['(emu/'+r'$cm^3$)']*len([l for l in y_header if l.startswith('magn_')]) + ['']
+
+    return y_data, y_columns, y_header, y_ids, y_labels, y_units, y_units_
 
 
 def read_exp(file_name):
     # read experimental data
     df = pd.read_csv(file_name, usecols=[0,1,2,3], names=['Q','R','dR','dQ'], skiprows=24, sep='\t', dtype=float)
     return df
+
+def drop_duplicates_list(l):
+    s = set()
+    s_add = s.add
+    return [x for x in l if not (x in s or s_add(x))]
+
+def convert_dens(x, m):
+    u = 1.66054
+    f = np.ones(len(x))
+    f[:len(m)] = [u*k/1e3 for k in m]
+    return x*f
+
+def convert_magn(x, y_header):
+    idx_m = [i for i, k in enumerate(y_header) if 'magn' in k]
+    f = np.ones(len(x))
+    for k in idx_m:
+        if 'prox' in y_header[k]:
+            f[k] *= x[y_header.index('dens_TI')]*9.274
+        elif 'AFM' in y_header[k]:
+            f[k] *= x[y_header.index('dens_AFM')]*9.274
+        elif 'FM' in y_header[k]:
+            f[k] *= x[y_header.index('dens_FM')]*9.274
+        else:
+            f[k] = 1.
+    return f*x
 
 #################################################################################################################
 
@@ -100,9 +132,10 @@ def process_data(data_dir, sample_name, exp_name, q, seed, include_roughness=Fal
 
     # read labels
     y_df = pd.read_csv(ydata, dtype=float)
-    y_data, y_columns, y_header, y_ids, y_labels, y_units = parse_labels(y_df, include_roughness=include_roughness)
+    y_data, y_columns, y_header, y_ids, y_labels, y_units, y_units_ = parse_labels(y_df,
+                                                                                   include_roughness=include_roughness)
 
-    return x_data, x_orig, x_moms, y_data, y_columns, y_header, y_ids, y_labels, y_units
+    return x_data, x_orig, x_moms, y_data, y_columns, y_header, y_ids, y_labels, y_units, y_units_
 
 
 def process_exp(exp_names, q, x_moms=(0,1)):
@@ -634,6 +667,7 @@ def plot_predicted(image_dir, y_pred, y_true, y_ids, y_labels, y_units):
         ax.set_xlim([x_min, x_max])
         ax.set_ylim([x_min, x_max])
         ax.plot([x_min, x_max], [x_min, x_max], color='black', linestyle='--')
+        ax.yaxis.labelpad = 0
         
     fig.tight_layout()
     fig.subplots_adjust(wspace=0.4, hspace=0.3)
@@ -714,9 +748,8 @@ def get_roc(df, d_sets):
 
 
 def get_roc_prox(df, y_header, column):
-    y_true = np.stack(df.loc[df['set']=='valid', 'y_true'].values)[:,-1]
-    y_pred = np.stack(df.loc[df['set']=='valid', 'y_pred'].values)[:,y_header.index(column)]
-
+    y_true = np.stack(df.loc[df['set']=='valid', 'y_true_'].values)[:,-1]
+    y_pred = np.stack(df.loc[df['set']=='valid', 'y_pred_'].values)[:,y_header.index(column)]
     fpr, tpr, th = roc_curve(y_true, y_pred)
     return fpr, tpr, th
 
@@ -796,8 +829,10 @@ def get_confusion_matrix(y_true, y_pred):
 
 def plot_confusion_matrix(image_dir, df, y_header, y_name, y_th):
     norm = mpl.colors.Normalize(vmin=0, vmax=1)
-    cm = get_confusion_matrix(np.stack(df.loc[df['set']=='test', 'y_true'])[:,-1].astype(int),
-                             (np.stack(df.loc[df['set']=='test', 'y_pred'])[:,y_header.index(y_name)]>=y_th).astype(int))
+    y_true = np.stack(df.loc[df['set']=='valid', 'y_true_'].values)[:,-1].astype(int)
+    y_pred = (np.stack(df.loc[df['set']=='valid', 'y_pred_'].values)[:,y_header.index(y_name)] >= y_th).astype(int)
+
+    cm = get_confusion_matrix(y_true, y_pred)
 
     # confusion matrix plot
     fig, ax = plt.subplots(figsize=(2.3,2.3))
@@ -973,7 +1008,7 @@ def plot_latent_representation(image_dir, x_data, y_data, y_ids, y_labels, y_uni
     fig.subplots_adjust(wspace=0.15, hspace=0.2)
     fig.savefig(image_dir + '/' + tag + '_' + mode_dict[mode] + '.png', dpi=400)
 
-    if mode == 2:
+    if (mode == 2) and (D.shape[1] < 100):
         # save colorbar
         norm = mpl.colors.Normalize(vmin=0, vmax=1)
         sm = mpl.cm.ScalarMappable(cmap=cmap_cm, norm=norm)
@@ -1039,14 +1074,11 @@ def plot_class_exp_statistics(image_dir, df_exp, reps):
 
 
 def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_units, y_th=None, y_lims=None):
-    # plot statistics of parameter in given column of latent representation z
+    # plot statistics of given parameter
     column = y_header.index(y_name)
     df_exp['temperature'] = df_exp['set'].map(lambda x: int(x[:-1]))
 
-    if 'y_pred' in df_exp.columns:
-        df_exp['p'] = df_exp['y_pred'].map(lambda x: x[column])
-    else:
-        df_exp['p'] = df_exp['z'].map(lambda x: x[column])
+    df_exp['p'] = df_exp['y_pred_'].map(lambda x: x[column])
     
     if y_th != None:
         df_exp['p_dist'] = df_exp['p'] - y_th
