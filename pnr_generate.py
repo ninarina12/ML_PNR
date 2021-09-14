@@ -167,7 +167,7 @@ q_exp = df['Q'].values
 
 def Al2O3_Bi2Se3_EuS_aAl2O3():
 	# layers
-	layer_names = ['$Al_2O_3$', '$Bi_2Se_3$', '$Bi_2Se_3$\ninterface', 'EuS', r'$\alpha-Al_2O_3$']
+	layer_names = [r'$\alpha-Al_2O_3$', '$Bi_2Se_3$', '$Bi_2Se_3$\ninterface', 'EuS', '$a-Al_2O_3$']
 	
 	# nominal densities (g/cm^3)
 	rho = [3.95, 6.82, 6.82, 5.75, 2.75]
@@ -226,7 +226,7 @@ def Al2O3_Bi2Se3_EuS_aAl2O3():
 
 def Al2O3_Cr2O3_BiSb2Te3_Te_TeO2():
 	# layers
-	layer_names = ['$Al_2O_3$', '$Cr_2O_3$', '$Cr_2O_3$\ninterface', 'TI\ninterface', 'TI', 'Te', '$TeO_2$']
+	layer_names = [r'$\alpha-Al_2O_3$', '$Cr_2O_3$', '$Cr_2O_3$\ninterface', 'TI\ninterface', 'TI', 'Te', '$TeO_2$']
 
 	# nominal densities (g/cm^3)
 	rho = [3.95, 5.22, 5.22, 0.2*7.7 + 0.8*6.5, 0.2*7.7 + 0.8*6.5, 6.24, 5.67]
