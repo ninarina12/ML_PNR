@@ -522,7 +522,14 @@ def get_threshold(image_dir, y_true, y_pred, y_label, y_unit, y_name, show=False
         fig.savefig(image_dir + '/threshold_' + y_name + '.pdf', bbox_inches='tight')
     return th0
 
-    
+
+def reject_outliers(x, m=2.):
+    d = np.abs(x - np.median(x))
+    mdev = np.median(d)
+    s = d/mdev if mdev else 0.
+    return x[s<m]
+
+        
 def plot_exp_statistics(image_dir, df_exp, reps, y_name, y_header, y_labels, y_units, y_th=None, y_lims=None):
     # plot statistics of given parameter
     column = y_header.index(y_name)
