@@ -6,11 +6,11 @@ import json
 from scipy.interpolate import interp1d
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
-from utils.utils_simulate import u
 
 # format progress bar
 bar_format = '{l_bar}{bar:10}{r_bar}{bar:-10b}'
 
+u = 1.66054 # conversion constant for density calculation
 
 def parse_metadata(dir_name):
 	# extract relevant parameters from metadata file
