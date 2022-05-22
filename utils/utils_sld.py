@@ -140,7 +140,7 @@ def plot_SLD(image_dir, sample_name, q, y_pred, y_header, title, scale=0, y_lims
 
     if not y_lims: y_lims = [im.min() - 0.5, re.max() + 0.5]
     format_axis(ax, 'z (nm)', 'SLD (10$^{-4}$/nm$^2$)', xlims=[z.min(), z.max()], ylims=y_lims)
-
+    ax.locator_params(axis='y', nbins=8)
     ax.legend(edgecolor='white', framealpha=1, loc='upper right', ncol=ncol)
     
     fig.tight_layout()

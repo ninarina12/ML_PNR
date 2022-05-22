@@ -9,7 +9,7 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 
 # standard formatting for plots
-fontsize = 16
+fontsize = 18
 textsize = 14
 plt.rcParams['font.family'] = 'lato'
 plt.rcParams['axes.linewidth'] = 1

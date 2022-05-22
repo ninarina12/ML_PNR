@@ -186,16 +186,21 @@ def plot_decoded_exp(image_dir, x_pred, sample_name, exp_names, q, x_moms):
 		ax2.legend(frameon=False, ncol=2, loc='upper right', columnspacing=1.4, handletextpad=0.4)
 		ax1.set_yscale('log')
 		ax2.set_yscale('log')
-		format_axis(ax1, 'Q (nm$^{-1}$)', 'Reflectivity', 'R$^{++}$', [q.min(), q.max()])
-		format_axis(ax2, 'Q (nm$^{-1}$)', ' ', 'R$^{--}$', [q.min(), q.max()])
-		
+		format_axis(ax1, 'Q (nm$^{-1}$)', 'Reflectivity', 'R$^{++}$', [q.min(), q.max()], nbins=5)
+		format_axis(ax2, 'Q (nm$^{-1}$)', ' ', 'R$^{--}$', [q.min(), q.max()], nbins=5)
 		fig.tight_layout()
 		fig.subplots_adjust(wspace=0.1)
 		fig.savefig(image_dir + '/decoded_exp.pdf', bbox_inches='tight')
 
-		ax.legend([s1, p1, s2, p2], ['R$^{++}$', 'Pred.', 'R$^{--}$', 'Pred.'], frameon=False, ncol=2, loc='lower left', columnspacing=1)
+		ax.legend([s1, p1, s2, p2], ['R$^{++}$', 'Pred.', 'R$^{--}$', 'Pred.'], frameon=False, ncol=2, loc='lower left', columnspacing=0.8)
 		ax.set_yscale('log')
-		format_axis(ax, 'Q (nm$^{-1}$)', 'Reflectivity', '', [q.min(), q.max()])
+		format_axis(ax, 'Q (nm$^{-1}$)', 'Reflectivity', '', [q.min(), q.max()], nbins=5)
+		y_major = mpl.ticker.LogLocator(base=10., numticks=10)
+		ax.yaxis.set_major_locator(y_major)
+		y_minor = mpl.ticker.LogLocator(base=10., subs=np.arange(1.,10.)*0.1, numticks=10)
+		ax.yaxis.set_minor_locator(y_minor)
+		ax.yaxis.set_minor_formatter(mpl.ticker.NullFormatter())
+		ax.tick_params(which='minor', direction='in', length=3)
 		fig_.tight_layout()
 		fig_.savefig(image_dir + '/decoded_exp_' + str(temps[0]) + 'K' + '.pdf', bbox_inches='tight')
 
@@ -219,7 +224,7 @@ def plot_decoded_exp(image_dir, x_pred, sample_name, exp_names, q, x_moms):
 
 		ax.legend(frameon=False, ncol=2, columnspacing=1)
 		ax.locator_params(axis='y', nbins=5)
-		format_axis(ax, 'Q (nm$^{-1}$)', 'Spin asymmetry', '', [q.min(), q.max()])
+		format_axis(ax, 'Q (nm$^{-1}$)', 'Spin asymmetry', '', [q.min(), q.max()], nbins=5)
 		fig.tight_layout()
 		fig.subplots_adjust(wspace=0.1)
 		fig.savefig(image_dir + '/decoded_exp_sa.pdf', bbox_inches='tight')
@@ -242,7 +247,7 @@ def plot_decoded_exp(image_dir, x_pred, sample_name, exp_names, q, x_moms):
 		s2 = ax.scatter(10*df_dd['Q'], df_dd['R'], s=24, color=spin_colors['-'], ec='none', label='R$^{--}$')
 
 		ax.legend([s1, p1, s2, p2], ['R$^{++}$', 'Pred.', 'R$^{--}$', 'Pred.'],
-				  frameon=False, ncol=2, loc='lower left', columnspacing=1, fontsize=textsize-2)
+				  frameon=False, ncol=2, loc='lower left', columnspacing=0.5, fontsize=textsize)
 		ax.set_yscale('log')
 		format_axis(ax, 'Q (nm$^{-1}$)', 'Reflectivity', '', [q.min(), q.max()])
 		y_major = mpl.ticker.LogLocator(base=10., numticks=10)

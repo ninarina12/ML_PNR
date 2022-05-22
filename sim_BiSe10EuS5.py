@@ -3,7 +3,7 @@ from utils.utils_format import format_parameters, format_metadata, make_dirs, cl
 from utils.utils_simulate import u, bc, run
 
 # data properties
-num_samples = 200000                                    # number of examples to generate
+num_samples = 10000                                    # number of examples to generate
 N = 256                                                 # number of q points for reflectivity plot
 q_min = 0.01
 q_max = 0.13

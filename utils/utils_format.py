@@ -143,7 +143,7 @@ def make_dirs(num_samples, sample_name, meta):
 			os.makedirs(data_dir)
 	comm.barrier()
 
-	dirs = next(os.walk(data_dir))[1]
+	dirs = [k for k in next(os.walk(data_dir))[1] if k.startswith('set')]
 	if len(dirs):
 		idns = [int(d.split('_')[-1]) for d in dirs]
 		idn = max(idns) + 1
