@@ -34,7 +34,7 @@ class SE1d(nn.Module):
 		# multi-layer perceptron
 		self.mlp = nn.Sequential(
 			nn.Linear(channels, channels//r, bias=False),
-			nn.ReLU(inplace=True),
+			nn.ReLU(),
 			nn.Linear(channels//r, channels, bias=False),
 			nn.Sigmoid()
 		)
