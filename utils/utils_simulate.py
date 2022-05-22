@@ -1,8 +1,15 @@
 import numpy as np
 import sys
 import copy
-from utils.utils_format import blockPrint, enablePrint
 
+def blockPrint():
+	sys.stdout = open(os.devnull, 'w')
+
+
+def enablePrint(out=None):
+	if out: sys.stdout = out
+	else: sys.stdout = sys.__stdout__
+               
 out = sys.stdout
 blockPrint() # suppress warnings on import
 from genx.models import spec_nx as model

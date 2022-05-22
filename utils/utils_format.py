@@ -8,15 +8,6 @@ from _ctypes import PyObj_FromPtr
 from mpi4py import MPI
 
 
-def blockPrint():
-	sys.stdout = open(os.devnull, 'w')
-
-
-def enablePrint(out=None):
-	if out: sys.stdout = out
-	else: sys.stdout = sys.__stdout__
-
-
 class NoIndent(object):
 	def __init__(self, value):
 		self.value = value
