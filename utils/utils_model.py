@@ -34,7 +34,7 @@ class SE1d(nn.Module):
 		# multi-layer perceptron
 		self.mlp = nn.Sequential(
 			nn.Linear(channels, channels//r, bias=False),
-			nn.ReLU(),
+			nn.ReLU(inplace=False),
 			nn.Linear(channels//r, channels, bias=False),
 			nn.Sigmoid()
 		)
@@ -132,7 +132,7 @@ class VAE(nn.Module):
 		modules = [nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=(kernel_size,2),
 							 stride=(pool_size,1), padding=((kernel_size-pool_size+1)//2,0), bias=False)]
 
-		modules.append(nn.LeakyReLU(negative_slope=slope))
+		modules.append(nn.LeakyReLU(negative_slope=slope, inplace=False))
 		if drop: modules.append(nn.Dropout(p=drop))
 			
 		return modules
@@ -141,7 +141,7 @@ class VAE(nn.Module):
 		modules = [nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
 							 stride=pool_size, padding=(kernel_size-pool_size+1)//2)]
 		
-		modules.append(nn.LeakyReLU(negative_slope=slope))
+		modules.append(nn.LeakyReLU(negative_slope=slope, inplace=False))
 		if drop: modules.append(nn.Dropout(p=drop))
 			
 		return modules
@@ -150,7 +150,7 @@ class VAE(nn.Module):
 		modules = [nn.ConvTranspose1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
 									  stride=pool_size, padding=(kernel_size-pool_size+1)//2, output_padding=1)]
 		
-		modules.append(nn.LeakyReLU(negative_slope=slope))
+		modules.append(nn.LeakyReLU(negative_slope=slope, inplace=False))
 		if drop: modules.append(nn.Dropout(p=drop))
 
 		return modules
@@ -158,7 +158,7 @@ class VAE(nn.Module):
 	def linear_block(self, in_features, out_features, slope, drop):
 		modules = [nn.Linear(in_features=in_features, out_features=out_features)]
 
-		modules.append(nn.LeakyReLU(negative_slope=slope))
+		modules.append(nn.LeakyReLU(negative_slope=slope, inplace=False))
 		if drop: modules.append(nn.Dropout(p=drop))
 
 		return modules
@@ -224,7 +224,7 @@ class CVAE(VAE):
 				)
 		
 		if self.scaler != None:
-			self.pos = nn.ReLU()
+			self.pos = nn.ReLU(inplace=False)
 
 	def label_loss(self, y_pred, y_true):
 		return torch.sum(torch.tensor(self.b2).to(y_pred.device)*F.mse_loss(y_pred, y_true, reduction='none'), dim=-1)
